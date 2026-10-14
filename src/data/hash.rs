@@ -56,7 +56,13 @@ impl Hasher for FxHasher {
 
     #[inline]
     fn finish(&self) -> u64 {
-        self.hash
+        // final mix (splitmix64): the hash tables use the low bits, which the
+        // multiply above leaves poorly mixed for keys such as "SN01234567" or
+        // time stamps (millions of collisions without it)
+        let mut z = self.hash;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
     }
 }
 

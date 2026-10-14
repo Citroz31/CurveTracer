@@ -1,6 +1,6 @@
 [package]
 name = "curve_tracer"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.95"
 description = "CurveTracer – fast, interactive curve plotting from CSV / Excel measurement files"
@@ -22,6 +22,7 @@ rfd = "0.17"
 calamine = "0.36"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+memchr = "2"
 
 # Static rendering for PNG / PowerPoint export
 tiny-skia = "0.11"

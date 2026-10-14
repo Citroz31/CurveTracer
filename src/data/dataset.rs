@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use super::hash::FxHashMap;
 
@@ -47,10 +47,10 @@ pub enum ColumnData {
         dict: Vec<String>,
         /// Numeric value of every dictionary entry (NaN if not a number).
         dict_num: Vec<f64>,
-        /// Dictionary codes in "natural" order (numbers ascending, then text).
-        sorted: Vec<u32>,
-        /// Rank of every code inside `sorted`.
-        rank: Vec<u32>,
+        /// (codes in "natural" order — numbers ascending, then text —, rank of
+        /// every code in that order). Computed at load time for usual
+        /// dictionaries, on first use for huge ones (a million distinct texts).
+        order: OnceLock<(Vec<u32>, Vec<u32>)>,
     },
     Num {
         values: Vec<f64>,
@@ -111,15 +111,14 @@ impl Column {
                 formula: None,
             };
         }
-        let (sorted, rank) = natural_order(&dict, &dict_num);
+        let order = eager_order(&dict, &dict_num);
         Column {
             name,
             data: ColumnData::Dict {
                 codes,
                 dict,
                 dict_num,
-                sorted,
-                rank,
+                order,
             },
             kind,
             n_unique,
@@ -170,15 +169,14 @@ impl Column {
                     })
                 })
                 .collect();
-            let (sorted, rank) = natural_order(&dict, &dict_num);
+            let order = eager_order(&dict, &dict_num);
             return Column {
                 name,
                 data: ColumnData::Dict {
                     codes,
                     dict,
                     dict_num,
-                    sorted,
-                    rank,
+                    order,
                 },
                 kind,
                 n_unique,
@@ -238,12 +236,20 @@ impl Column {
         }
     }
 
-    /// Dictionary codes in natural order.
-    pub fn sorted_codes(&self) -> Option<&[u32]> {
+    /// (codes in natural order, rank of every code), computed on first use
+    /// for huge dictionaries.
+    fn order(&self) -> Option<&(Vec<u32>, Vec<u32>)> {
         match &self.data {
-            ColumnData::Dict { sorted, .. } => Some(sorted),
+            ColumnData::Dict {
+                dict, dict_num, order, ..
+            } => Some(order.get_or_init(|| natural_order(dict, dict_num))),
             ColumnData::Num { .. } => None,
         }
+    }
+
+    /// Dictionary codes in natural order.
+    pub fn sorted_codes(&self) -> Option<&[u32]> {
+        self.order().map(|(sorted, _)| sorted.as_slice())
     }
 
     #[inline]
@@ -277,7 +283,7 @@ impl Column {
     /// Sorting rank of a grouping key (natural order).
     pub fn key_order(&self, key: u64) -> (u32, f64) {
         match &self.data {
-            ColumnData::Dict { rank, .. } => (rank[key as usize], 0.0),
+            ColumnData::Dict { .. } => (self.order().map_or(0, |(_, rank)| rank[key as usize]), 0.0),
             ColumnData::Num { .. } => (0, f64::from_bits(key)),
         }
     }
@@ -286,7 +292,7 @@ impl Column {
     #[inline]
     pub fn rank(&self, row: usize) -> Option<u32> {
         match &self.data {
-            ColumnData::Dict { codes, rank, .. } => Some(rank[codes[row] as usize]),
+            ColumnData::Dict { codes, .. } => self.order().map(|(_, rank)| rank[codes[row] as usize]),
             ColumnData::Num { .. } => None,
         }
     }
@@ -315,11 +321,23 @@ fn norm_zero(v: f64) -> f64 {
     if v == 0.0 { 0.0 } else { v }
 }
 
+/// Dictionaries up to this size are put in natural order at load time.
+const EAGER_ORDER_MAX: usize = 100_000;
+
+fn eager_order(dict: &[String], dict_num: &[f64]) -> OnceLock<(Vec<u32>, Vec<u32>)> {
+    let order = OnceLock::new();
+    if dict.len() <= EAGER_ORDER_MAX {
+        let _ = order.set(natural_order(dict, dict_num));
+    }
+    order
+}
+
 /// Natural ordering of dictionary entries: numbers ascending, then text
 /// (case-insensitive), empty values last.
 fn natural_order(dict: &[String], dict_num: &[f64]) -> (Vec<u32>, Vec<u32>) {
     let mut sorted: Vec<u32> = (0..dict.len() as u32).collect();
-    sorted.sort_by(|&a, &b| {
+    // the dictionary entries are distinct: no need for a stable sort
+    sorted.sort_unstable_by(|&a, &b| {
         compare_entries(
             &dict[a as usize],
             dict_num[a as usize],
@@ -349,45 +367,57 @@ pub fn compare_entries(sa: &str, na: f64, sb: &str, nb: f64) -> Ordering {
 }
 
 /// Case-insensitive comparison where digit runs are compared numerically
-/// ("State 2" < "State 10").
+/// ("State 2" < "State 10"). No allocation: it runs millions of times when a
+/// big text column is sorted.
 pub fn natural_text_cmp(a: &str, b: &str) -> Ordering {
-    let mut ia = a.chars().peekable();
-    let mut ib = b.chars().peekable();
-    loop {
-        match (ia.peek().copied(), ib.peek().copied()) {
-            (None, None) => return a.cmp(b),
-            (None, Some(_)) => return Ordering::Less,
-            (Some(_), None) => return Ordering::Greater,
-            (Some(ca), Some(cb)) => {
-                if ca.is_ascii_digit() && cb.is_ascii_digit() {
-                    let mut na = String::new();
-                    while let Some(c) = ia.peek().copied().filter(|c| c.is_ascii_digit()) {
-                        na.push(c);
-                        ia.next();
-                    }
-                    let mut nb = String::new();
-                    while let Some(c) = ib.peek().copied().filter(|c| c.is_ascii_digit()) {
-                        nb.push(c);
-                        ib.next();
-                    }
-                    let ta = na.trim_start_matches('0');
-                    let tb = nb.trim_start_matches('0');
-                    let ord = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb));
-                    if ord != Ordering::Equal {
-                        return ord;
-                    }
-                } else {
-                    let la = ca.to_lowercase().next().unwrap_or(ca);
-                    let lb = cb.to_lowercase().next().unwrap_or(cb);
-                    if la != lb {
-                        return la.cmp(&lb);
-                    }
-                    ia.next();
-                    ib.next();
-                }
+    let (ab, bb) = (a.as_bytes(), b.as_bytes());
+    let (mut i, mut j) = (0, 0);
+    while i < ab.len() && j < bb.len() {
+        let (ca, cb) = (ab[i], bb[j]);
+        if ca.is_ascii_digit() && cb.is_ascii_digit() {
+            let (si, sj) = (i, j);
+            while i < ab.len() && ab[i].is_ascii_digit() {
+                i += 1;
             }
+            while j < bb.len() && bb[j].is_ascii_digit() {
+                j += 1;
+            }
+            let ta = trim_zeros(&ab[si..i]);
+            let tb = trim_zeros(&bb[sj..j]);
+            let ord = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb));
+            if ord != Ordering::Equal {
+                return ord;
+            }
+        } else if ca.is_ascii() && cb.is_ascii() {
+            let (la, lb) = (ca.to_ascii_lowercase(), cb.to_ascii_lowercase());
+            if la != lb {
+                return la.cmp(&lb);
+            }
+            i += 1;
+            j += 1;
+        } else {
+            let (Some(xa), Some(xb)) = (a[i..].chars().next(), b[j..].chars().next()) else {
+                break;
+            };
+            let la = xa.to_lowercase().next().unwrap_or(xa);
+            let lb = xb.to_lowercase().next().unwrap_or(xb);
+            if la != lb {
+                return la.cmp(&lb);
+            }
+            i += xa.len_utf8();
+            j += xb.len_utf8();
         }
     }
+    match (i >= ab.len(), j >= bb.len()) {
+        (true, true) => a.cmp(b),
+        (true, false) => Ordering::Less,
+        _ => Ordering::Greater,
+    }
+}
+
+fn trim_zeros(d: &[u8]) -> &[u8] {
+    let k = d.iter().position(|&c| c != b'0').unwrap_or(d.len());
+    &d[k..]
 }
 
 /// Parses a number, returns `None` for anything that is not a number.
@@ -543,6 +573,87 @@ mod tests {
         assert_eq!(parse_number("1,5", true), Some(1.5));
         assert_eq!(parse_number("", false), None);
         assert_eq!(parse_number("nan", false), None);
+    }
+
+    /// The previous implementation (allocating), as the reference.
+    fn natural_reference(a: &str, b: &str) -> Ordering {
+        let mut ia = a.chars().peekable();
+        let mut ib = b.chars().peekable();
+        loop {
+            match (ia.peek().copied(), ib.peek().copied()) {
+                (None, None) => return a.cmp(b),
+                (None, Some(_)) => return Ordering::Less,
+                (Some(_), None) => return Ordering::Greater,
+                (Some(ca), Some(cb)) => {
+                    if ca.is_ascii_digit() && cb.is_ascii_digit() {
+                        let mut na = String::new();
+                        while let Some(c) = ia.peek().copied().filter(|c| c.is_ascii_digit()) {
+                            na.push(c);
+                            ia.next();
+                        }
+                        let mut nb = String::new();
+                        while let Some(c) = ib.peek().copied().filter(|c| c.is_ascii_digit()) {
+                            nb.push(c);
+                            ib.next();
+                        }
+                        let ta = na.trim_start_matches('0');
+                        let tb = nb.trim_start_matches('0');
+                        let ord = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb));
+                        if ord != Ordering::Equal {
+                            return ord;
+                        }
+                    } else {
+                        let la = ca.to_lowercase().next().unwrap_or(ca);
+                        let lb = cb.to_lowercase().next().unwrap_or(cb);
+                        if la != lb {
+                            return la.cmp(&lb);
+                        }
+                        ia.next();
+                        ib.next();
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn natural_same_as_reference() {
+        let words = [
+            "",
+            "a",
+            "A",
+            "b",
+            "State 2",
+            "State 10",
+            "state 010",
+            "SN07102601",
+            "SN7102601",
+            "x9y",
+            "x09y",
+            "x9",
+            "é",
+            "É10",
+            "e10",
+            "Ünit 3",
+            "unit 3",
+            "2026-10-09 14-21-00",
+            "2026-10-9 14-21-00",
+            "007",
+            "7",
+            "0",
+            "00",
+            "a1b2",
+            "a1b10",
+            "A01B2",
+            "Ω",
+            "ω2",
+            "z",
+        ];
+        for a in words {
+            for b in words {
+                assert_eq!(natural_text_cmp(a, b), natural_reference(a, b), "{a:?} vs {b:?}");
+            }
+        }
     }
 
     #[test]

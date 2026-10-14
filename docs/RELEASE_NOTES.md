@@ -10,6 +10,14 @@
 > Au premier lancement, Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » (exécutable non signé) :
 > **Informations complémentaires → Exécuter quand même**.
 
+## Nouveautés de la version 0.3.1 — chargement des gros fichiers
+
+- **Chargement CSV jusqu'à 14× plus rapide** sur les vrais fichiers de mesure (1 M lignes, 277 Mo : 13 s → < 1 s) :
+  les colonnes de mesures (valeurs presque toutes différentes) passent automatiquement en stockage numérique direct au lieu d'un dictionnaire.
+- Conversion des nombres plus rapide (exacte), découpage des lignes vectorisé, valeur répétée d'une ligne à l'autre sans hachage.
+- Fichiers **entre guillemets** chargés en parallèle (2× plus rapide).
+- Colonnes texte à valeurs uniques (numéros de série, horodatages) : 9 s → 1 s (meilleur hachage, tri naturel sans allocation et calculé à la demande pour les très grandes listes).
+
 ## Nouveautés de la version 0.3.0
 
 - **Écran d'accueil des espaces de travail** : créer un nouveau workspace (nom + dossier) ou en ouvrir un, avec la **liste des workspaces récents** (emplacement, dernière utilisation).

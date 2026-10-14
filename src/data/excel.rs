@@ -48,7 +48,9 @@ pub fn load_excel(path: &Path, opts: &ImportOptions) -> Result<Dataset, String> 
 
     let n_cols = names.len();
     let skip = guess.first_data.saturating_sub(first_row);
-    let mut cols: Vec<ColBuilder<'static>> = (0..n_cols).map(|_| ColBuilder::new(range.height())).collect();
+    let mut cols: Vec<ColBuilder<'static>> = (0..n_cols)
+        .map(|_| ColBuilder::new(range.height(), decimal_comma))
+        .collect();
     let mut buf = String::new();
     for row in range.rows().skip(skip) {
         let blank = row.iter().all(|c| matches!(c, Data::Empty));

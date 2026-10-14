@@ -52,7 +52,7 @@ on règle la mise en page, puis on exporte le tout dans un PowerPoint.
 - Chargement **multi-cœur** : le fichier est découpé en blocs analysés en
   parallèle ; chaque colonne est encodée en dictionnaire (une recherche de hachage
   par cellule, conversion numérique une seule fois par valeur unique).
-  Ordre de grandeur : 500 000 lignes × 29 colonnes (120 Mo) chargées en < 1 s,
+  Ordre de grandeur : 1 000 000 de lignes × 29 colonnes de mesures (277 Mo) chargées en < 1 s,
   ~60 Mo en mémoire.
 - Calcul des courbes (filtres, séries, agrégations) en tâche de fond : l'interface
   ne se fige jamais (4 ms pour filtrer/grouper 500 000 lignes).

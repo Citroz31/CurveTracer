@@ -1,6 +1,6 @@
 ---
 title: "CurveTracer — Guide utilisateur"
-subtitle: "Version 0.3.0"
+subtitle: "Version 0.3.1"
 ---
 
 # 1. Présentation
