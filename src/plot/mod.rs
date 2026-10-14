@@ -1,3 +1,4 @@
+pub mod axis_editor;
 pub mod compute;
 pub mod config;
 pub mod geom;

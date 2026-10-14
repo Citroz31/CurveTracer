@@ -10,6 +10,17 @@
 > Au premier lancement, Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » (exécutable non signé) :
 > **Informations complémentaires → Exécuter quand même**.
 
+## Nouveautés de la version 0.3.0
+
+- **Écran d'accueil des espaces de travail** : créer un nouveau workspace (nom + dossier) ou en ouvrir un, avec la **liste des workspaces récents** (emplacement, dernière utilisation).
+  Menu **📁** dans la barre du haut pour créer / ouvrir / changer de workspace à tout moment, avec demande d'enregistrement des modifications.
+- **Navigation à la molette** : les graphes sont empilés, la **molette** passe au graphe suivant / précédent (Page Up / Page Down aussi) ; liste des graphes avec miniatures à gauche (réordonner, dupliquer, supprimer). Le zoom passe à **Ctrl + molette**.
+- **Clic sur un axe** pour le renommer et régler sa plage, son pas et la grille ; **clic sur le titre** pour l'éditer.
+- **Outils de zoom** : *Pan* / *Zoom area* (rectangle au clic gauche), zoom + / −, *Fit Y*, *Previous view*, *Original scale*, *Axes & title…*.
+- **Styles des températures** : −40 °C **bleu tiret-point** (nouveau style *Custom*, motif modifiable), 25 °C **vert plein**, 85 °C **rouge tirets** — aussi dans les exports PNG / SVG / PowerPoint.
+- Titre de l'application lisible sur la barre bleue (nouveau logo).
+- Graduations automatiques 1 / 2 / 5 : une plage étroite est toujours graduée.
+
 ## Nouveautés de la version 0.2.0
 
 - **De-embedding** des accès d'entrée / sortie à partir de fichiers Touchstone `.s2p` (bouton 🔌 *De-embedding* de chaque fichier) :

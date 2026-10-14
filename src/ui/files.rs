@@ -370,10 +370,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         section(ui, "Workspace", |ui| {
             ui.horizontal(|ui| {
                 if ui.button("📁 Open workspace…").clicked() {
-                    app.open_workspace_dialog(&ctx);
+                    app.request_switch(crate::app::Switch::OpenDialog, &ctx);
                 }
                 if ui.button("💾 Save workspace").clicked() {
                     app.save_workspace_dialog(false);
+                }
+                if ui
+                    .button("🏠 Start screen")
+                    .on_hover_text("Create or open another workspace")
+                    .clicked()
+                {
+                    app.request_switch(crate::app::Switch::Close, &ctx);
                 }
             });
             ui.label(

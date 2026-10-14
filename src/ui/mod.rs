@@ -7,11 +7,12 @@ pub mod functions;
 pub mod help;
 pub mod plot_settings;
 pub mod plots;
+pub mod start;
 pub mod table;
 
 use egui::{Align, Color32, Frame, Key, KeyboardShortcut, Layout, Margin, Modifiers, RichText, Stroke, Ui};
 
-use crate::app::{App, Page, setup_style};
+use crate::app::{App, Page, Switch, setup_style};
 use crate::fonts::FontBook;
 use crate::plot::config::{FontSpec, Rgba};
 
@@ -22,6 +23,12 @@ pub const WARN: Color32 = Color32::from_rgb(200, 120, 20);
 pub const ERR: Color32 = Color32::from_rgb(190, 50, 50);
 
 pub fn show(app: &mut App, ui: &mut Ui) {
+    start::pending_switch_dialog(app, ui.ctx());
+    if app.show_start {
+        start::show(app, ui);
+        preview_dropped_files(ui.ctx());
+        return;
+    }
     shortcuts(app, ui.ctx());
     top_bar(app, ui);
     status_bar(app, ui);
@@ -56,26 +63,13 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
                 ui.visuals_mut().override_text_color = Some(Color32::WHITE);
                 ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.hovered.weak_bg_fill = NAVY_LIGHT;
-                ui.label(RichText::new("📈 CurveTracer").size(18.0).strong());
+                logo(ui);
                 ui.add_space(12.0);
                 let ctx = ui.ctx().clone();
                 ui.menu_button("File", |ui| {
                     ui.visuals_mut().override_text_color = None;
                     if ui.button("📂 Open data files…   (Ctrl+O)").clicked() {
                         app.open_files_dialog(&ctx);
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui.button("📁 Open workspace…").clicked() {
-                        app.open_workspace_dialog(&ctx);
-                        ui.close();
-                    }
-                    if ui.button("💾 Save workspace   (Ctrl+S)").clicked() {
-                        app.save_workspace_dialog(false);
-                        ui.close();
-                    }
-                    if ui.button("💾 Save workspace as…").clicked() {
-                        app.save_workspace_dialog(true);
                         ui.close();
                     }
                     ui.separator();
@@ -86,6 +80,7 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
                         ui.close();
                     }
                 });
+                workspace_menu(app, ui, &ctx);
                 ui.menu_button("View", |ui| {
                     ui.visuals_mut().override_text_color = None;
                     if ui.checkbox(&mut app.dark, "Dark theme").changed() {
@@ -106,20 +101,17 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui
-                        .button(RichText::new("QuickSave").strong())
+                        .button(RichText::new("💾 QuickSave").strong().color(Color32::WHITE))
                         .on_hover_text("Save the workspace (sources, functions, plots)")
                         .clicked()
                     {
                         app.save_workspace_dialog(false);
                     }
-                    if let Some(p) = &app.workspace_path {
+                    if app.is_dirty_cached(ui.input(|i| i.time)) {
                         ui.label(
-                            RichText::new(
-                                p.file_name()
-                                    .map(|n| n.to_string_lossy().into_owned())
-                                    .unwrap_or_default(),
-                            )
-                            .color(Color32::from_gray(200)),
+                            RichText::new("● unsaved changes")
+                                .small()
+                                .color(Color32::from_rgb(255, 200, 120)),
                         );
                     }
                     if let Some(b) = &app.busy {
@@ -129,6 +121,80 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
                 });
             });
         });
+}
+
+/// "Workspace ▾" menu of the top bar: new / open / recent / save / close.
+fn workspace_menu(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
+    let name = app.workspace_name().unwrap_or_else(|| "No workspace".to_owned());
+    ui.menu_button(
+        RichText::new(format!("📁 {name}")).strong().color(Color32::WHITE),
+        |ui| {
+            ui.visuals_mut().override_text_color = None;
+            if ui.button("+ New workspace…").clicked() {
+                app.request_switch(Switch::Close, ctx);
+                ui.close();
+            }
+            if ui.button("📂 Open workspace…").clicked() {
+                app.request_switch(Switch::OpenDialog, ctx);
+                ui.close();
+            }
+            let recent: Vec<_> = app.recent.iter().filter(|r| r.exists()).take(10).cloned().collect();
+            ui.add_enabled_ui(!recent.is_empty(), |ui| {
+                ui.menu_button("🕘 Recent workspaces", |ui| {
+                    for r in recent {
+                        if ui
+                            .button(r.name())
+                            .on_hover_text(format!("{}\n{}", r.path.display(), crate::recent::ago(r.last)))
+                            .clicked()
+                        {
+                            app.request_switch(Switch::Open(r.path.clone()), ctx);
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            ui.separator();
+            if ui.button("💾 Save   (Ctrl+S)").clicked() {
+                app.save_workspace_dialog(false);
+                ui.close();
+            }
+            if ui.button("💾 Save as…").clicked() {
+                app.save_workspace_dialog(true);
+                ui.close();
+            }
+            ui.separator();
+            if ui.button("🏠 Start screen (close the workspace)").clicked() {
+                app.request_switch(Switch::Close, ctx);
+                ui.close();
+            }
+        },
+    )
+    .response
+    .on_hover_text("Current workspace: create, open or switch workspaces");
+}
+
+pub const ACCENT: Color32 = Color32::from_rgb(110, 180, 255);
+
+/// Application logo: a small curve badge and the name, readable on the navy bar.
+pub fn logo(ui: &mut Ui) {
+    let h = 24.0;
+    let (r, _) = ui.allocate_exact_size(egui::vec2(h, h), egui::Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(r, 5.0, Color32::WHITE);
+    let pts: Vec<egui::Pos2> = (0..=24)
+        .map(|k| {
+            let t = k as f32 / 24.0;
+            let y = 0.5 - 0.32 * (t * 6.0).sin() * (1.0 - 0.5 * t);
+            egui::pos2(r.left() + 3.0 + t * (h - 6.0), r.top() + y * h)
+        })
+        .collect();
+    p.add(egui::Shape::line(pts, Stroke::new(2.2, NAVY_LIGHT)));
+    ui.add_space(4.0);
+    let mut job = egui::text::LayoutJob::default();
+    let font = egui::FontId::proportional(19.0);
+    job.append("Curve", 0.0, egui::TextFormat::simple(font.clone(), Color32::WHITE));
+    job.append("Tracer", 0.0, egui::TextFormat::simple(font, ACCENT));
+    ui.label(job);
 }
 
 fn status_bar(app: &mut App, ui: &mut Ui) {

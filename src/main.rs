@@ -5,6 +5,7 @@ mod data;
 mod export;
 mod fonts;
 mod plot;
+mod recent;
 mod ui;
 
 fn main() -> eframe::Result {

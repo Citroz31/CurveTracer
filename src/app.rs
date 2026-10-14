@@ -175,6 +175,22 @@ pub enum TaskMsg {
     Failed(String),
 }
 
+/// Change of workspace waiting for the "save the changes?" answer.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Switch {
+    Open(PathBuf),
+    OpenDialog,
+    /// Back to the start screen (to create or open another workspace).
+    Close,
+}
+
+/// State of the start screen.
+pub struct StartState {
+    pub new_name: String,
+    pub new_dir: PathBuf,
+    pub error: Option<String>,
+}
+
 #[derive(Default)]
 pub struct DataPageState {
     pub source: usize,
@@ -222,6 +238,19 @@ pub struct App {
     pub export: ExportSettings,
     next_id: u64,
     pub workspace_path: Option<PathBuf>,
+    /// Start screen (choose / create a workspace) shown instead of the pages.
+    pub show_start: bool,
+    pub start: StartState,
+    pub recent: Vec<crate::recent::RecentWorkspace>,
+    /// Workspace content when it was last opened / saved (change detection).
+    saved_snapshot: Option<String>,
+    /// Take the snapshot once the data sources are loaded.
+    snapshot_pending: bool,
+    pub pending_switch: Option<Switch>,
+    /// Plots page: left-drag draws a zoom rectangle instead of panning.
+    pub box_zoom: bool,
+    /// (time, result) of the last change detection (it serializes the workspace).
+    dirty_check: std::cell::Cell<(f64, bool)>,
     pub import_defaults: ImportOptions,
     pub data_page: DataPageState,
     pub dark: bool,
@@ -273,6 +302,18 @@ impl App {
             export: ExportSettings::default(),
             next_id: 1,
             workspace_path: None,
+            show_start: true,
+            start: StartState {
+                new_name: String::new(),
+                new_dir: crate::recent::default_workspace_dir(),
+                error: None,
+            },
+            recent: crate::recent::load(),
+            saved_snapshot: None,
+            snapshot_pending: false,
+            pending_switch: None,
+            box_zoom: false,
+            dirty_check: std::cell::Cell::new((f64::NEG_INFINITY, false)),
             import_defaults: ImportOptions::default(),
             data_page: DataPageState::default(),
             dark: false,
@@ -285,7 +326,12 @@ impl App {
                 app.load_workspace(&p, ctx);
             } else if p.is_file() {
                 app.add_source(p, None, ctx);
+                app.show_start = false;
             }
+        }
+        // new workspaces go next to the last one used
+        if let Some(dir) = app.recent.first().and_then(|r| r.path.parent()) {
+            app.start.new_dir = dir.to_path_buf();
         }
         app
     }
@@ -538,6 +584,10 @@ impl App {
                 }
             }
         }
+        if self.snapshot_pending && self.sources.iter().all(|s| !s.loading) {
+            self.snapshot_pending = false;
+            self.saved_snapshot = Some(self.snapshot());
+        }
         while let Ok(msg) = self.task_rx.try_recv() {
             self.busy = None;
             match msg {
@@ -566,11 +616,12 @@ impl App {
                 .map(|e| e.to_string_lossy().to_ascii_lowercase())
                 .unwrap_or_default();
             if ext == WORKSPACE_EXT {
-                self.load_workspace(&p, ctx);
+                self.request_switch(Switch::Open(p), ctx);
             } else if ext == "ttf" || ext == "otf" {
                 self.add_font_file(&p, ctx);
             } else {
                 self.add_source(p, None, ctx);
+                self.show_start = false;
                 if self.page != Page::Plots {
                     self.page = Page::Files;
                 }
@@ -657,6 +708,20 @@ impl App {
         self.active = i + 1;
     }
 
+    /// Moves a plot one place up (`-1`) or down (`+1`).
+    pub fn move_plot(&mut self, i: usize, dir: isize) {
+        let j = i as isize + dir;
+        if j < 0 || j as usize >= self.plots.len() || i >= self.plots.len() {
+            return;
+        }
+        self.plots.swap(i, j as usize);
+        if self.active == i {
+            self.active = j as usize;
+        } else if self.active == j as usize {
+            self.active = i;
+        }
+    }
+
     pub fn remove_plot(&mut self, i: usize) {
         if i < self.plots.len() {
             self.plots.remove(i);
@@ -704,6 +769,8 @@ impl App {
             Ok(text) => match std::fs::write(path, text) {
                 Ok(()) => {
                     self.workspace_path = Some(path.to_path_buf());
+                    self.saved_snapshot = Some(self.snapshot());
+                    crate::recent::touch(&mut self.recent, path);
                     self.set_status(format!("Workspace saved to {}", path.display()), false);
                 }
                 Err(e) => self.set_status(format!("Cannot write {}: {e}", path.display()), true),
@@ -741,6 +808,9 @@ impl App {
             dlg = dlg.set_directory(d);
         }
         if let Some(p) = dlg.pick_file() {
+            if let Some(parent) = p.parent() {
+                self.export.last_dir = Some(parent.to_path_buf());
+            }
             self.load_workspace(&p, ctx);
         }
     }
@@ -760,6 +830,7 @@ impl App {
                 return;
             }
         };
+        self.reset_project();
         let mut book = (*self.fonts).clone();
         for f in &ws.fonts {
             let _ = book.add_file(f);
@@ -807,7 +878,102 @@ impl App {
             Page::Plots
         };
         self.workspace_path = Some(path.to_path_buf());
+        self.snapshot_pending = true;
+        self.show_start = false;
+        crate::recent::touch(&mut self.recent, path);
         self.set_status(format!("Workspace {} opened", path.display()), false);
+    }
+
+    /// Workspace name (file name without extension).
+    pub fn workspace_name(&self) -> Option<String> {
+        self.workspace_path
+            .as_ref()
+            .and_then(|p| p.file_stem())
+            .map(|n| n.to_string_lossy().into_owned())
+    }
+
+    /// Workspace content, without what changes by itself (folders of the dialogs).
+    fn snapshot(&self) -> String {
+        let mut ws = self.workspace();
+        ws.export.last_dir = None;
+        serde_json::to_string(&ws).unwrap_or_default()
+    }
+
+    /// The workspace has changes that are not saved.
+    pub fn is_dirty(&self) -> bool {
+        let empty = self.sources.is_empty() && self.plots.is_empty() && self.functions.is_empty();
+        match &self.saved_snapshot {
+            Some(s) => !self.snapshot_pending && *s != self.snapshot(),
+            None => !empty && !self.snapshot_pending,
+        }
+    }
+
+    /// `is_dirty`, recomputed at most twice a second (for the top bar).
+    pub fn is_dirty_cached(&self, now: f64) -> bool {
+        let (t, d) = self.dirty_check.get();
+        if (now - t).abs() < 0.5 {
+            return d;
+        }
+        let d = self.is_dirty();
+        self.dirty_check.set((now, d));
+        d
+    }
+
+    /// Empties the project (data sources, plots, functions).
+    fn reset_project(&mut self) {
+        self.sources.clear();
+        self.plots.clear();
+        self.functions.clear();
+        let last_dir = self.export.last_dir.take();
+        self.export = ExportSettings {
+            last_dir,
+            ..Default::default()
+        };
+        self.workspace_path = None;
+        self.saved_snapshot = None;
+        self.snapshot_pending = false;
+        self.active = 0;
+        self.page = Page::Files;
+    }
+
+    /// Changes of workspace: asks first when the current one has unsaved changes.
+    pub fn request_switch(&mut self, sw: Switch, ctx: &Context) {
+        if self.is_dirty() {
+            self.pending_switch = Some(sw);
+        } else {
+            self.perform_switch(sw, ctx);
+        }
+    }
+
+    pub fn perform_switch(&mut self, sw: Switch, ctx: &Context) {
+        self.pending_switch = None;
+        match sw {
+            Switch::Open(p) => self.load_workspace(&p, ctx),
+            Switch::OpenDialog => self.open_workspace_dialog(ctx),
+            Switch::Close => {
+                self.reset_project();
+                self.recent = crate::recent::load();
+                self.show_start = true;
+            }
+        }
+    }
+
+    /// Creates an empty workspace file and opens it.
+    pub fn create_workspace(&mut self, path: &Path) -> Result<(), String> {
+        if path.exists() {
+            return Err(format!("{} already exists", path.display()));
+        }
+        if let Some(d) = path.parent() {
+            std::fs::create_dir_all(d).map_err(|e| format!("Cannot create {}: {e}", d.display()))?;
+        }
+        self.reset_project();
+        self.save_workspace(path);
+        if self.workspace_path.is_none() {
+            return Err(self.status.as_ref().map(|s| s.text.clone()).unwrap_or_default());
+        }
+        self.show_start = false;
+        self.set_status(format!("New workspace {} created", path.display()), false);
+        Ok(())
     }
 
     // ---- exports --------------------------------------------------------------

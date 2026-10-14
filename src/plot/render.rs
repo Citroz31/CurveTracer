@@ -198,7 +198,8 @@ trait Canvas {
     fn rect(&mut self, b: Bx, fill: Option<Rgba>, stroke: Option<(Rgba, f32)>);
     fn line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, c: Rgba, w: f32);
     /// Polyline with the style of a trace (`clip`: limited to the frame).
-    fn polyline(&mut self, pts: &[(f32, f32)], c: Rgba, w: f32, kind: LineKind, clip: bool);
+    /// `dash`: dash pattern in multiples of `w` (empty = solid).
+    fn polyline(&mut self, pts: &[(f32, f32)], c: Rgba, w: f32, dash: &[f32], clip: bool);
     fn marker(&mut self, kind: MarkerKind, x: f32, y: f32, r: f32, c: Rgba, clip: bool);
     /// Text with its top-left corner at (x, y), rotated by `angle` degrees.
     fn text(&mut self, ts: &TextStyle, s: &str, x: f32, y: f32, angle: f32);
@@ -206,12 +207,9 @@ trait Canvas {
     fn group(&mut self, _name: Option<&str>) {}
 }
 
-fn dash_pattern(kind: LineKind, w: f32) -> Option<Vec<f32>> {
-    match kind {
-        LineKind::Dashed => Some(vec![w * 5.0, w * 3.0]),
-        LineKind::Dotted => Some(vec![w * 0.1, w * 2.5]),
-        _ => None,
-    }
+/// Dash pattern in pixels.
+fn dash_px(dash: &[f32], w: f32) -> Option<Vec<f32>> {
+    (dash.len() >= 2).then(|| dash.iter().map(|d| d * w).collect())
 }
 
 struct PixmapCanvas {
@@ -305,7 +303,7 @@ impl Canvas for PixmapCanvas {
         }
     }
 
-    fn polyline(&mut self, pts: &[(f32, f32)], c: Rgba, w: f32, kind: LineKind, clip: bool) {
+    fn polyline(&mut self, pts: &[(f32, f32)], c: Rgba, w: f32, dash: &[f32], clip: bool) {
         let mut pb = PathBuilder::new();
         for (k, &(x, y)) in pts.iter().enumerate() {
             if k == 0 {
@@ -326,7 +324,7 @@ impl Canvas for PixmapCanvas {
             line_join: LineJoin::Round,
             ..Default::default()
         };
-        st.dash = dash_pattern(kind, w).and_then(|d| StrokeDash::new(d, 0.0));
+        st.dash = dash_px(dash, w).and_then(|d| StrokeDash::new(d, 0.0));
         let mask = if clip { self.mask.as_ref() } else { None };
         self.pm.stroke_path(&path, &paint(c), &st, Transform::identity(), mask);
     }
@@ -469,7 +467,7 @@ impl Canvas for SvgCanvas {
         ));
     }
 
-    fn polyline(&mut self, pts: &[(f32, f32)], c: Rgba, w: f32, kind: LineKind, clip: bool) {
+    fn polyline(&mut self, pts: &[(f32, f32)], c: Rgba, w: f32, dash: &[f32], clip: bool) {
         if pts.is_empty() {
             return;
         }
@@ -484,8 +482,11 @@ impl Canvas for SvgCanvas {
             p.push_str(&f2(y));
             p.push(' ');
         }
-        let dash = dash_pattern(kind, w)
-            .map(|d| format!(" stroke-dasharray=\"{} {}\"", f2(d[0]), f2(d[1])))
+        let dash = dash_px(dash, w)
+            .map(|d| {
+                let list: Vec<String> = d.iter().map(|v| f2(*v)).collect();
+                format!(" stroke-dasharray=\"{}\"", list.join(" "))
+            })
             .unwrap_or_default();
         self.out.push_str(&format!(
             "<polyline points=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"{dash}{}{}/>\n",
@@ -870,7 +871,7 @@ fn draw_plot(
             if st.line != LineKind::None {
                 pts.clear();
                 pts.extend(buf.iter().map(|p| (clamp(sx(p[0])), clamp(sy(p[1])))));
-                c.polyline(&pts, st.color, st.width * s, st.line, true);
+                c.polyline(&pts, st.color, st.width * s, &st.dash, true);
             }
             if st.marker != MarkerKind::None && buf.len() <= 20_000 {
                 for p in &buf {
@@ -938,7 +939,7 @@ fn draw_plot(
             let x0 = lb.x0 + ex;
             if st.line != LineKind::None {
                 let lw = (st.width * s).min(lm.row_h * 0.5);
-                c.polyline(&[(x0, cy), (x0 + lm.swatch, cy)], st.color, lw, st.line, false);
+                c.polyline(&[(x0, cy), (x0 + lm.swatch, cy)], st.color, lw, &st.dash, false);
             }
             if st.marker != MarkerKind::None {
                 c.marker(st.marker, x0 + lm.swatch * 0.5, cy, st.marker_size * s, st.color, false);

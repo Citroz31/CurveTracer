@@ -959,6 +959,35 @@ fn traces_tab(app: &mut App, ui: &mut Ui) {
                 ui.label("Line style");
                 line_combo(ui, "default_line", &mut cfg.traces.line);
                 ui.end_row();
+                ui.label("Custom pattern").on_hover_text(
+                    "Dashes of the “Custom” line style: dash gap dash gap… in multiples of the line width \
+                     (6 2.5 1.5 2.5 = dash-dot)",
+                );
+                ui.horizontal(|ui| {
+                    let id = ui.id().with("custom_dash_text");
+                    let mut text: String = ui
+                        .data(|d| d.get_temp(id))
+                        .unwrap_or_else(|| crate::plot::style::format_dash(&cfg.traces.custom_dash));
+                    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(110.0));
+                    let ok = crate::plot::style::parse_dash(&text);
+                    if r.changed()
+                        && let Some(d) = &ok
+                    {
+                        cfg.traces.custom_dash = d.clone();
+                    }
+                    if r.has_focus() {
+                        ui.data_mut(|d| d.insert_temp(id, text.clone()));
+                    } else {
+                        ui.data_mut(|d| d.remove::<String>(id));
+                    }
+                    if ok.is_none() {
+                        ui.label(RichText::new("⚠ numbers > 0").color(super::ERR).small());
+                    }
+                    if ui.small_button("Reset").clicked() {
+                        cfg.traces.custom_dash = crate::plot::config::DEFAULT_CUSTOM_DASH.to_vec();
+                    }
+                });
+                ui.end_row();
                 ui.label("Markers");
                 marker_combo(ui, "default_marker", &mut cfg.traces.marker);
                 ui.end_row();
@@ -972,9 +1001,12 @@ fn traces_tab(app: &mut App, ui: &mut Ui) {
             });
             ui.checkbox(
                 &mut cfg.traces.temperature_colors,
-                "Temperature colors: −40 °C blue, 25 °C green, 85 °C red",
+                "Temperature styles: −40 °C blue custom dashes, 25 °C green solid, 85 °C red dashed",
             )
-            .on_hover_text("Used when a temperature column (e.g. Set_TempC) is the series of the plot");
+            .on_hover_text(
+                "Used when a temperature column (e.g. Set_TempC) is the series of the plot. \
+                 With several Y columns, the 2nd and 3rd ones are drawn in lighter colors.",
+            );
             if ui.button("Apply these defaults to all plots").clicked() {
                 apply_all = true;
             }

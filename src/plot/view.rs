@@ -57,6 +57,35 @@ pub struct PlotState {
     pub view: Option<[f64; 4]>,
     /// The legend is being dragged.
     dragging_legend: bool,
+    /// Left-drag draws a zoom rectangle (instead of panning).
+    pub box_zoom: bool,
+    /// View to apply at the next frame (zoom buttons, previous view…).
+    pub set_view: Option<[f64; 4]>,
+    /// Previous views (for "previous view").
+    pub history: Vec<[f64; 4]>,
+    stable_view: Option<[f64; 4]>,
+    frame_view: Option<[f64; 4]>,
+    view_changed_at: f64,
+    /// Axis / title editor opened by a click.
+    pub edit: Option<EditTarget>,
+    edit_pos: Pos2,
+}
+
+/// What the axis editor shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditTarget {
+    X,
+    Y,
+    Title,
+    All,
+}
+
+fn same_view(a: &[f64; 4], b: &[f64; 4]) -> bool {
+    let tol = |lo: f64, hi: f64| ((hi - lo).abs() * 1e-9).max(1e-300);
+    (a[0] - b[0]).abs() <= tol(a[0], a[1])
+        && (a[1] - b[1]).abs() <= tol(a[0], a[1])
+        && (a[2] - b[2]).abs() <= tol(a[2], a[3])
+        && (a[3] - b[3]).abs() <= tol(a[2], a[3])
 }
 
 impl PlotState {
@@ -107,6 +136,82 @@ impl PlotState {
         self.pending = Some((key, rx));
     }
 
+    /// Zooms in (factor < 1) or out (factor > 1) around the center of the view.
+    pub fn zoom(&mut self, factor: f64) {
+        if let Some(v) = self.view {
+            let (cx, cy) = ((v[0] + v[1]) * 0.5, (v[2] + v[3]) * 0.5);
+            let (hx, hy) = ((v[1] - v[0]) * 0.5 * factor, (v[3] - v[2]) * 0.5 * factor);
+            self.set_view = Some([cx - hx, cx + hx, cy - hy, cy + hy]);
+        }
+    }
+
+    /// Fits the Y range to the curves visible in the current X range.
+    pub fn fit_y(&mut self, cfg: &PlotConfig) {
+        let (Some(v), Some(data)) = (self.view, &self.data) else {
+            return;
+        };
+        let styles = trace_styles(cfg, data);
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for (t, s) in data.traces.iter().zip(&styles) {
+            if !s.visible {
+                continue;
+            }
+            for seg in &t.segments {
+                for p in seg {
+                    if p[0] >= v[0] && p[0] <= v[1] && p[1].is_finite() {
+                        lo = lo.min(p[1]);
+                        hi = hi.max(p[1]);
+                    }
+                }
+            }
+        }
+        if lo.is_finite() && hi.is_finite() {
+            let pad = if hi > lo {
+                (hi - lo) * 0.05
+            } else {
+                lo.abs().max(1.0) * 0.1
+            };
+            self.set_view = Some([v[0], v[1], lo - pad, hi + pad]);
+        }
+    }
+
+    /// Goes back to the previous view.
+    pub fn previous_view(&mut self) {
+        if let Some(v) = self.history.pop() {
+            self.stable_view = Some(v);
+            self.set_view = Some(v);
+        }
+    }
+
+    /// Records the views the user stays on (for "previous view").
+    fn track_view(&mut self, v: [f64; 4], now: f64, pointer_down: bool) {
+        if self.frame_view.is_none_or(|f| !same_view(&f, &v)) {
+            self.frame_view = Some(v);
+            self.view_changed_at = now;
+            return;
+        }
+        if pointer_down || now - self.view_changed_at < 0.35 {
+            return;
+        }
+        match self.stable_view {
+            Some(s) if !same_view(&s, &v) => {
+                self.history.push(s);
+                if self.history.len() > 50 {
+                    self.history.remove(0);
+                }
+                self.stable_view = Some(v);
+            }
+            None => self.stable_view = Some(v),
+            _ => {}
+        }
+    }
+
+    /// Opens the axis / title editor.
+    pub fn open_editor(&mut self, target: EditTarget, pos: Pos2) {
+        self.edit = Some(target);
+        self.edit_pos = pos;
+    }
+
     /// Blocks until the pending computation (if any) is done.
     pub fn wait(&mut self) {
         if let Some((key, rx)) = self.pending.take()
@@ -123,10 +228,22 @@ struct LegendRow {
     label: String,
     color: Color32,
     line: LineKind,
+    dash: Vec<f32>,
     marker: MarkerKind,
     width: f32,
     visible: bool,
     key: String,
+}
+
+/// Dashed polyline (pattern in multiples of the width) on the screen.
+fn dashed_shapes(pts: &[Pos2], stroke: Stroke, pattern: &[f32]) -> Vec<egui::Shape> {
+    let w = stroke.width.max(0.5);
+    let dashes: Vec<f32> = pattern.iter().step_by(2).map(|d| (d * w).max(0.5)).collect();
+    let gaps: Vec<f32> = pattern.iter().skip(1).step_by(2).map(|d| (d * w).max(0.5)).collect();
+    if dashes.is_empty() || gaps.is_empty() {
+        return vec![egui::Shape::line(pts.to_vec(), stroke)];
+    }
+    egui::Shape::dashed_line_with_offset(pts, stroke, &dashes, &gaps, 0.0)
 }
 
 fn line_style(kind: LineKind, width: f32) -> LineStyle {
@@ -199,6 +316,37 @@ fn step_spacer(step: f64, categorical: bool) -> impl Fn(GridInput) -> Vec<GridMa
     }
 }
 
+/// Points, color, width and dash pattern of a curve drawn with a custom pattern.
+type CustomPath = (Vec<[f64; 2]>, Color32, f32, Vec<f32>);
+
+/// Minimum grid spacing given to egui_plot (its `base_step_size` = this many pixels).
+const GRID_MIN_PX: f32 = 8.0;
+
+/// Automatic ticks with 1 / 2 / 5 steps: a labelled tick about every
+/// `target_px` pixels and fainter grid lines in between (egui_plot's default
+/// spacer only uses powers of 10, which can leave a narrow range unlabelled).
+fn auto_spacer(target_px: f32) -> impl Fn(GridInput) -> Vec<GridMark> {
+    move |input: GridInput| -> Vec<GridMark> {
+        let (lo, hi) = input.bounds;
+        let per_px = input.base_step_size / GRID_MIN_PX as f64;
+        let raw = per_px * target_px as f64;
+        let mag = 10f64.powf(raw.max(1e-300).log10().floor());
+        let major = [1.0, 2.0, 5.0, 10.0]
+            .iter()
+            .map(|m| m * mag)
+            .find(|s| *s >= raw * 0.999)
+            .unwrap_or(10.0 * mag);
+        let minor = major / 5.0;
+        geom::ticks(lo, hi, minor)
+            .into_iter()
+            .map(|v| GridMark {
+                value: v,
+                step_size: if geom::is_multiple(v, major) { major } else { minor },
+            })
+            .collect()
+    }
+}
+
 /// Shows a plot in `area`. `interactive = false` for thumbnails.
 pub fn show_plot(
     ui: &mut Ui,
@@ -236,12 +384,19 @@ pub fn show_plot(
     let mut fig = area.shrink(6.0 * thumb);
 
     // ---- title --------------------------------------------------------------
+    let mut title_rect = Rect::NOTHING;
     if lay.show_title && !lay.title.trim().is_empty() {
         let mut f = font_id(fonts, &lay.title_font);
         f.size *= thumb;
-        let galley = painter.layout_no_wrap(lay.title.clone(), f, c32(lay.title_font.color));
+        let mut galley = painter.layout_no_wrap(lay.title.clone(), f.clone(), c32(lay.title_font.color));
+        if !interactive && galley.size().x > fig.width() {
+            // thumbnails: shrink a long title to the width
+            f.size *= (fig.width() / galley.size().x).max(0.4);
+            galley = painter.layout_no_wrap(lay.title.clone(), f, c32(lay.title_font.color));
+        }
         let pos = Pos2::new(fig.center().x - galley.size().x * 0.5, fig.top());
         let h = galley.size().y;
+        title_rect = Rect::from_min_size(pos, galley.size()).expand(3.0);
         painter.galley(pos, galley, Color32::BLACK);
         fig.min.y += h + 6.0 * thumb;
     }
@@ -257,6 +412,7 @@ pub fn show_plot(
             label: s.label.clone(),
             color: c32(s.color),
             line: s.line,
+            dash: s.dash.clone(),
             marker: s.marker,
             width: s.width,
             visible: s.visible,
@@ -352,13 +508,16 @@ pub fn show_plot(
         y_axis = y_axis.label_spacing(egui::Rangef::new(1.0, 2.0));
     }
 
-    let target_view = if interactive || st.reset_view {
+    let explicit = if interactive { st.set_view.take() } else { None };
+    let target_view = if let Some(v) = explicit {
+        v
+    } else if interactive || st.reset_view {
         resolve_view(cfg, &data, None)
     } else {
         // thumbnails mirror the view of the interactive plot
         st.view.unwrap_or_else(|| resolve_view(cfg, &data, None))
     };
-    let reset = !interactive || st.reset_view || st.view.is_none();
+    let reset = !interactive || st.reset_view || st.view.is_none() || explicit.is_some();
     let opts = cfg.options.clone();
     let x_fmt_dec = x_dec;
     let y_fmt_dec = y_dec;
@@ -369,10 +528,16 @@ pub fn show_plot(
         .custom_x_axes(vec![x_axis])
         .custom_y_axes(vec![y_axis])
         .allow_double_click_reset(false)
+        // the mouse wheel goes from one plot to the next: Ctrl + wheel zooms
         .allow_zoom(interactive)
-        .allow_drag(interactive)
-        .allow_scroll(interactive)
+        .allow_drag(interactive && !st.box_zoom)
+        .allow_scroll(false)
         .allow_boxed_zoom(interactive)
+        .boxed_zoom_pointer_button(if st.box_zoom {
+            egui::PointerButton::Primary
+        } else {
+            egui::PointerButton::Secondary
+        })
         .allow_axis_zoom_drag(interactive)
         .show_x(interactive && opts.hover_readout)
         .show_y(interactive && opts.hover_readout)
@@ -398,13 +563,18 @@ pub fn show_plot(
                 HoverPosition::Elsewhere { position } => format!("x = {}\ny = {}", fx(position.x), fy(position.y)),
             })
         });
+    plot = plot.grid_spacing(egui::Rangef::new(GRID_MIN_PX, 300.0));
     if let Some(s) = x_step {
         plot = plot.x_grid_spacer(step_spacer(s, false));
     } else if cats.is_some() {
         plot = plot.x_grid_spacer(step_spacer(1.0, true));
+    } else {
+        plot = plot.x_grid_spacer(auto_spacer(95.0 * thumb));
     }
     if let Some(s) = y_step {
         plot = plot.y_grid_spacer(step_spacer(s, false));
+    } else {
+        plot = plot.y_grid_spacer(auto_spacer(48.0 * thumb));
     }
 
     let px_width = plot_rect.width().max(64.0) as usize;
@@ -429,6 +599,8 @@ pub fn show_plot(
                 let (x0, x1) = (b.min()[0], b.max()[0]);
                 let margin = (x1 - x0) * 0.25;
                 let mut buf: Vec<[f64; 2]> = Vec::new();
+                // custom dash patterns are painted after the plot
+                let mut custom: Vec<CustomPath> = Vec::new();
                 for (ti, (t, s)) in traces_data.traces.iter().zip(&styles_c).enumerate() {
                     if !s.visible {
                         continue;
@@ -444,7 +616,17 @@ pub fn show_plot(
                         if buf.is_empty() {
                             continue;
                         }
-                        if s.line != LineKind::None {
+                        if s.line == LineKind::Custom {
+                            // invisible line: hover read-out only
+                            pu.line(
+                                Line::new(s.label.clone(), PlotPoints::new(buf.clone()))
+                                    .id(Id::new(("ct_line", ti, si)))
+                                    // TRANSPARENT would mean "automatic color" for egui_plot
+                                    .color(Color32::from_black_alpha(1))
+                                    .width(0.0),
+                            );
+                            custom.push((buf.clone(), color, s.width, s.dash.clone()));
+                        } else if s.line != LineKind::None {
                             pu.line(
                                 Line::new(s.label.clone(), PlotPoints::new(buf.clone()))
                                     .id(Id::new(("ct_line", ti, si)))
@@ -465,14 +647,31 @@ pub fn show_plot(
                         }
                     }
                 }
+                custom
             })
         })
         .inner;
     let tf = resp.transform;
+    if !resp.inner.is_empty() {
+        let cp = ui.painter_at(*tf.frame());
+        for (pts, color, w, dash) in &resp.inner {
+            let screen: Vec<Pos2> = pts
+                .iter()
+                .map(|p| {
+                    let q = tf.position_from_point(&PlotPoint::new(p[0], p[1]));
+                    Pos2::new(q.x.clamp(-1e5, 1e5), q.y.clamp(-1e5, 1e5))
+                })
+                .collect();
+            cp.extend(dashed_shapes(&screen, Stroke::new(*w, *color), dash));
+        }
+    }
     if interactive {
         st.reset_view = false;
         let b = tf.bounds();
-        st.view = Some([b.min()[0], b.max()[0], b.min()[1], b.max()[1]]);
+        let v = [b.min()[0], b.max()[0], b.min()[1], b.max()[1]];
+        st.view = Some(v);
+        let (now, down) = ui.input(|i| (i.time, i.pointer.any_down()));
+        st.track_view(v, now, down);
     }
     let frame = *tf.frame();
 
@@ -497,8 +696,88 @@ pub fn show_plot(
                 ui.close();
             }
             ui.separator();
-            ui.label(RichText::new("Click on a curve: add / remove a marker\nDrag: pan · Wheel: zoom · Right-drag: box zoom\nDouble-click: reset view").weak());
+            if ui.add_enabled(!st.history.is_empty(), egui::Button::new("⏴ Previous view")).clicked() {
+                st.previous_view();
+                ui.close();
+            }
+            if ui.button("📐 Axes & title…").clicked() {
+                st.open_editor(EditTarget::All, ui.min_rect().left_top());
+                ui.close();
+            }
+            ui.separator();
+            ui.label(RichText::new("Click on a curve: add / remove a marker\nDrag: pan · Ctrl + wheel: zoom · Right-drag: box zoom\nWheel: previous / next plot · Double-click: reset view\nClick on an axis or on the title: edit it").weak());
         });
+    }
+
+    // ---- click on the axes / title: editor --------------------------------------
+    if interactive {
+        let zones = [
+            (
+                EditTarget::X,
+                Rect::from_min_max(
+                    Pos2::new(frame.left(), frame.bottom() + 1.0),
+                    Pos2::new(frame.right(), plot_rect.bottom()),
+                ),
+                "X axis",
+            ),
+            (
+                EditTarget::Y,
+                Rect::from_min_max(
+                    Pos2::new(plot_rect.left(), frame.top()),
+                    Pos2::new(frame.left() - 1.0, frame.bottom()),
+                ),
+                "Y axis",
+            ),
+            (EditTarget::Title, title_rect, "Title"),
+        ];
+        for (target, zone, name) in zones {
+            if zone.width() < 2.0 || zone.height() < 2.0 {
+                continue;
+            }
+            let r = ui
+                .interact(zone, ui.id().with(("ct_axis_edit", cfg.id, name)), Sense::click())
+                .on_hover_cursor(CursorIcon::PointingHand)
+                .on_hover_text(if target == EditTarget::Title {
+                    "Click to edit the title".to_owned()
+                } else {
+                    format!("Click to edit the {name} (title, range, ticks) · drag to zoom this axis")
+                });
+            if r.hovered() {
+                ui.painter().rect_stroke(
+                    zone,
+                    3.0,
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(40, 110, 220, 120)),
+                    StrokeKind::Inside,
+                );
+            }
+            if r.clicked() {
+                st.open_editor(target, r.interact_pointer_pos().unwrap_or(zone.center()));
+            }
+        }
+        if let Some(target) = st.edit {
+            let auto = (data.x_label.clone(), data.y_label.clone());
+            let view = st.view;
+            let mut open = true;
+            let title = match target {
+                EditTarget::X => "X axis",
+                EditTarget::Y => "Y axis",
+                EditTarget::Title => "Title",
+                EditTarget::All => "Axes & title",
+            };
+            let pos = st.edit_pos;
+            egui::Window::new(title)
+                .id(Id::new(("ct_axis_editor", cfg.id)))
+                .default_pos(pos + egui::vec2(10.0, 10.0))
+                .collapsible(false)
+                .resizable(false)
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    super::axis_editor::show(ui, cfg, target, &auto, view);
+                });
+            if !open {
+                st.edit = None;
+            }
+        }
     }
 
     // ---- data markers -------------------------------------------------------
@@ -575,8 +854,8 @@ pub fn show_plot(
             let a = Pos2::new(x0, cy);
             let b = Pos2::new(x0 + lm.swatch, cy);
             match row.line {
-                LineKind::Dashed => {
-                    lpainter.extend(egui::Shape::dashed_line(&[a, b], Stroke::new(w, color), 6.0, 3.0));
+                LineKind::Dashed | LineKind::Custom => {
+                    lpainter.extend(dashed_shapes(&[a, b], Stroke::new(w, color), &row.dash));
                 }
                 LineKind::Dotted => {
                     lpainter.extend(egui::Shape::dotted_line(&[a, b], color, 5.0, w * 0.7));

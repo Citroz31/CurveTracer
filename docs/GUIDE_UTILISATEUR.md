@@ -1,6 +1,6 @@
 ---
 title: "CurveTracer — Guide utilisateur"
-subtitle: "Version 0.2.0"
+subtitle: "Version 0.3.0"
 ---
 
 # 1. Présentation
@@ -14,10 +14,24 @@ de façon rapide et interactive. Le principe :
 3. on règle la **mise en page** (titres, polices, graduations, légende…) ;
 4. on **exporte** en PowerPoint, en images PNG / SVG ou en CSV (page *Export*).
 
-Nouveautés de la version 0.2.0 : **de-embedding** des pertes d'entrée / sortie
-à partir de fichiers `.s2p` (§ 3.1), **couleurs par défaut des températures**
-(−40 °C bleu, 25 °C vert, 85 °C rouge) et traits de 2 px (§ 5.6), **export SVG**
-(vectoriel) des graphes et dans le PowerPoint (§ 5 et § 8).
+Nouveautés de la version 0.3.0 :
+
+- **écran d'accueil des espaces de travail** : créer un nouveau workspace ou en
+  ouvrir un, avec la liste des workspaces récents (§ 2.1) ; menu **📁** de la
+  barre du haut pour changer de workspace à tout moment ;
+- **navigation entre les graphes à la molette** : les graphes sont empilés et
+  la molette passe de l'un à l'autre, la liste à gauche montre les miniatures
+  (§ 5) ;
+- **clic sur un axe ou sur le titre** pour le renommer et régler sa plage, son
+  pas de graduation (§ 6.1) ;
+- **outils de zoom** : déplacement / zoom sur une zone, zoom + / −, *Fit Y*,
+  vue précédente, retour à l'échelle d'origine (§ 6) ;
+- **styles des températures** : −40 °C en **bleu tiret-point** (style
+  *Custom*, motif modifiable), 25 °C en **vert plein**, 85 °C en **rouge
+  tirets** (§ 5.6).
+
+Version 0.2.0 : de-embedding à partir de fichiers `.s2p` (§ 3.1), export SVG
+(§ 5 et § 8).
 
 L'interface est organisée en pages, accessibles par la barre de navigation à
 droite de la fenêtre :
@@ -31,9 +45,11 @@ droite de la fenêtre :
 | **Export** | exporter en PowerPoint / PNG / SVG / CSV |
 | **Help** | aide-mémoire intégré |
 
-La barre du haut contient le menu **File** (ouvrir des fichiers, ouvrir /
-enregistrer un espace de travail, charger une police) et le bouton
-**QuickSave**. La barre du bas affiche les messages (chargement terminé,
+La barre du haut contient le menu **File** (ouvrir des fichiers, charger une
+police), le menu **📁 *nom du workspace*** (nouveau, ouvrir, récents,
+enregistrer, écran d'accueil), le menu **View** et le bouton **QuickSave**
+(précédé de « ● unsaved changes » quand il y a des modifications non
+enregistrées). La barre du bas affiche les messages (chargement terminé,
 erreurs…) et la mémoire utilisée.
 
 # 2. Installation
@@ -51,6 +67,37 @@ erreurs…) et la mémoire utilisée.
 
 Raccourcis utiles : **Ctrl+O** ouvrir des fichiers, **Ctrl+S** enregistrer
 l'espace de travail.
+
+## 2.1 Au démarrage : choisir un espace de travail
+
+![Écran d'accueil](screenshots/start.png)
+
+Au lancement, CurveTracer affiche l'écran **Choose a workspace** avant la page
+principale :
+
+- **New workspace** : saisir un **nom** et choisir le **dossier** (*Browse…* ;
+  par défaut `Documents\CurveTracer`, ou le dossier du dernier workspace
+  utilisé), puis **Create the workspace** (ou Entrée). Le fichier
+  `nom.ctw` est créé immédiatement ; QuickSave / Ctrl+S l'enregistrent ensuite.
+- **Open a workspace file…** : aller chercher un `.ctw` dans un de vos dossiers
+  (on peut aussi le glisser-déposer sur la fenêtre).
+- **Recent workspaces** : les workspaces créés ou ouverts récemment, du plus
+  récent au plus ancien, avec leur emplacement et la date de dernière
+  utilisation (« 2 min ago », « 3 h ago »…). Un clic l'ouvre. Un fichier
+  déplacé ou supprimé est barré : la croix le retire de la liste (clic droit →
+  *Remove from the list* pour les autres, *Clear the list* pour tout effacer).
+- **Continue without a workspace** : travailler sans fichier `.ctw` (il pourra
+  être enregistré plus tard).
+
+La liste des récents est mémorisée dans le dossier de configuration de
+l'utilisateur (`%APPDATA%\CurveTracer` sous Windows).
+
+**À tout moment**, le menu **📁** de la barre du haut permet de créer un
+nouveau workspace, d'en ouvrir un autre (fichier ou liste des récents),
+d'enregistrer, ou de revenir à l'écran d'accueil. S'il y a des modifications
+non enregistrées, CurveTracer demande d'abord **Save / Don't save / Cancel**.
+
+![Menu Workspace](screenshots/workspace_menu.png)
 
 # 3. Charger des données (page *File Select*)
 
@@ -151,18 +198,29 @@ fonctions utilisateur.
 
 # 5. Créer un graphe (page *Plots*)
 
-Cliquer **Add Plot** sur un fichier (page *File Select*) ou **+ New plot** en
-haut de la page *Plots*. Chaque graphe a son onglet (`1. S21 25°C`,
-`2. …`) ; un clic droit sur l'onglet propose **Copy / Split Plot** (dupliquer)
-et **Delete**.
+Cliquer **Add Plot** sur un fichier (page *File Select*) ou **+ New** au-dessus
+de la liste des graphes.
 
 ![Page Plots](screenshots/plots.png)
 
-La barre d'outils au-dessus du graphe contient : le **nom** du graphe, un
-résumé (nombre de courbes, de points, de lignes retenues, temps de calcul), et
-les boutons **⟲** (réinitialiser la vue), **Copy / Split Plot**, **PNG**
-(image haute résolution), **SVG** (image vectorielle, modifiable dans
-Inkscape, Illustrator ou PowerPoint), **Download Data** (courbes en CSV) et **🗑**.
+**Passer d'un graphe à l'autre** : les graphes sont **empilés verticalement**.
+La **molette de la souris** sur le graphe fait défiler vers le graphe
+**suivant / précédent** (avec une animation). On peut aussi utiliser
+**Page Up / Page Down**, cliquer une **miniature** de la liste à gauche, ou
+un point de l'indicateur à droite du graphe (le point bleu = graphe affiché).
+La liste à gauche (redimensionnable) montre le numéro, le nom et une
+miniature de chaque graphe ; un **clic droit** sur une miniature propose
+**Copy / Split Plot**, **Move up / Move down** (réordonner) et **Delete**.
+
+> Le zoom à la molette se fait maintenant avec **Ctrl + molette** (ou les
+> boutons 🔍 de la barre d'outils).
+
+La barre d'outils au-dessus du graphe contient, sur la 1ʳᵉ ligne : le **nom**
+du graphe, un résumé (nombre de courbes, de points, de lignes, temps de
+calcul) et les boutons **Copy / Split Plot**, **PNG** (image haute
+résolution), **SVG** (image vectorielle, modifiable dans Inkscape, Illustrator
+ou PowerPoint), **Download Data** (courbes en CSV) et **🗑** ; sur la 2ᵉ ligne,
+les **outils de zoom / d'axes** (voir § 6).
 
 Le panneau de droite contient quatre onglets : **Data**, **Layout**,
 **Plot Options**, **Trace Options**.
@@ -261,12 +319,20 @@ Les polices proposées : *Proportional*, *Monospace*, et les polices installées
 ![Onglet Trace Options](screenshots/traces.png)
 
 - **Defaults** : palette de couleurs, épaisseur (**2 px** par défaut), style
-  de trait (plein, tirets, pointillés, aucun), marqueurs et leur taille ;
-  **Apply these defaults to all plots**.
-- **Temperature colors** (coché par défaut) : quand la série est une
-  température (`Set_TempC`, `DUT_TempC`…), la courbe à **−40 °C est bleue**,
-  celle à **25 °C verte** et celle à **85 °C rouge**. Si plusieurs colonnes Y
-  sont tracées, la 2ᵉ est en tirets et la 3ᵉ en pointillés pour les distinguer.
+  de trait (plein, tirets, pointillés, **Custom**, aucun), marqueurs et leur
+  taille ; **Apply these defaults to all plots**.
+- **Custom pattern** : motif du style **Custom (dash-dot)**, sous la forme
+  `trait espace trait espace…` en multiples de l'épaisseur du trait. Par
+  défaut `6 2.5 1.5 2.5` = tiret long, espace, tiret court, espace (tiret-point).
+  *Reset* rétablit ce motif.
+- **Temperature styles** (coché par défaut) : quand la série est une
+  température (`Set_TempC`, `DUT_TempC`…) :
+  - **−40 °C : bleu, trait *Custom*** (tiret-point) ;
+  - **25 °C : vert, trait plein** ;
+  - **85 °C : rouge, tirets**.
+
+  Si plusieurs colonnes Y sont tracées (ex. `S21db` et `S21db raw`), la 2ᵉ et
+  la 3ᵉ gardent ces styles avec des couleurs plus claires.
 - **Curves** : pour chaque courbe — visibilité, couleur, épaisseur, style,
   marqueur et **libellé de légende personnalisé**. **Show all / Hide all /
   Reset** agissent sur toutes les courbes.
@@ -275,15 +341,28 @@ Les polices proposées : *Proportional*, *Monospace*, et les polices installées
 
 | Action | Effet |
 |---|---|
-| Molette | zoom autour de la souris |
-| Glisser (clic gauche) | déplacer la vue |
+| **Molette** | graphe **suivant / précédent** |
+| **Ctrl + molette** | zoom autour de la souris |
+| Glisser (clic gauche) | déplacer la vue (mode *Pan*) ou dessiner la zone à zoomer (mode *Zoom area*) |
 | Clic droit + glisser | zoom sur un rectangle |
 | Glisser sur un axe | zoom sur cet axe seulement |
-| Double-clic | revenir à la vue initiale |
+| **Clic sur un axe / le titre** | l'éditer (§ 6.1) |
+| Double-clic | revenir à l'échelle d'origine |
 | Survol | valeurs x / y de la courbe la plus proche |
 | **Clic sur une courbe** | pose un **curseur** avec ses valeurs x / y |
 | Clic sur un curseur | le supprime |
-| Clic droit | menu : *Reset view*, *Clear markers* |
+| Clic droit | menu : *Reset view*, *Previous view*, *Axes & title…*, *Clear markers* |
+
+**Outils de la barre d'outils** (2ᵉ ligne) :
+
+| Outil | Effet |
+|---|---|
+| **✋ Pan** / **⬚ Zoom area** | rôle du glisser gauche : déplacer la vue, ou tracer le rectangle sur lequel zoomer |
+| **🔍 +** / **🔍 −** | zoom avant / arrière autour du centre |
+| **↕ Fit Y** | ajuste l'axe Y aux courbes visibles dans la plage X affichée |
+| **⏴ Previous view** | revient au zoom précédent (historique des vues) |
+| **⟲ Original scale** | revient à l'échelle d'origine (plages configurées ou automatiques) |
+| **📐 Axes & title…** | ouvre l'éditeur des deux axes et du titre |
 
 **La légende** se déplace à la souris. Déposée **contre un bord** du graphe,
 elle passe **à l'extérieur du cadre** et le graphe se réduit automatiquement
@@ -292,6 +371,25 @@ correspondante. Quand il y a beaucoup de courbes, la légende se répartit sur
 plusieurs colonnes.
 
 ![Légende placée à l'extérieur, curseur posé](screenshots/legend_out.png)
+
+## 6.1 Renommer et régler un axe en cliquant dessus
+
+Survoler un axe l'encadre en bleu ; **un clic** (sans glisser) ouvre son
+éditeur :
+
+![Éditeur de l'axe X](screenshots/axis_editor.png)
+
+- **Title** : nom de l'axe (vide = nom automatique, tiré de la colonne et de
+  son unité, affiché en grisé) ;
+- **Range** : *Auto*, ou **min / max** imposés ; *Use current zoom* reprend la
+  plage affichée ;
+- **Tick step** : *Auto* ou pas imposé ;
+- **Grid** : afficher le quadrillage ;
+- tailles des titres d'axes et des graduations.
+
+Un clic sur le **titre** du graphe ouvre l'éditeur du titre (texte, affichage,
+taille). Les modifications sont immédiates et enregistrées avec le graphe
+(mêmes réglages que l'onglet *Layout*).
 
 # 7. Fonctions utilisateur (page *Functions*)
 
@@ -351,11 +449,19 @@ Exemples :
 
 # 9. Espaces de travail
 
-**File → Save workspace**, **QuickSave** ou **Ctrl+S** enregistre dans un
-fichier `.ctw` : la liste des fichiers de données et leurs options, les
-fonctions utilisateur, tous les graphes et leurs réglages, et les options
-d'export. **File → Open workspace** (ou glisser-déposer le `.ctw`) recharge le
-tout ; les fichiers de données sont relus depuis leur emplacement d'origine.
+Un espace de travail (`.ctw`) contient la liste des fichiers de données et
+leurs options (de-embedding compris), les fonctions utilisateur, tous les
+graphes et leurs réglages, et les options d'export. Les fichiers de données
+eux-mêmes ne sont pas copiés : ils sont relus depuis leur emplacement
+d'origine.
+
+- **Créer / ouvrir** : écran d'accueil (§ 2.1) ou menu **📁** de la barre du
+  haut (*New workspace…*, *Open workspace…*, *Recent workspaces*), ou
+  glisser-déposer un `.ctw` sur la fenêtre.
+- **Enregistrer** : **QuickSave**, **Ctrl+S** ou **📁 → Save** ; **📁 → Save
+  as…** pour une copie sous un autre nom.
+- **Changer de workspace** : si le workspace courant a des modifications non
+  enregistrées, CurveTracer propose **Save**, **Don't save** ou **Cancel**.
 
 Astuce : associer l'extension `.ctw` à `CurveTracer.exe` dans Windows permet
 d'ouvrir un projet par double-clic.

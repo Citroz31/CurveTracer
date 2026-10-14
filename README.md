@@ -14,6 +14,14 @@ on règle la mise en page, puis on exporte le tout dans un PowerPoint.
 
 ## Fonctionnalités
 
+### Espaces de travail
+- **Écran d'accueil** : créer un nouveau workspace (nom + dossier) ou en ouvrir
+  un, avec la **liste des workspaces récents**.
+- Menu **📁** de la barre du haut : nouveau, ouvrir, récents, enregistrer,
+  retour à l'accueil — avec demande d'enregistrement des modifications.
+
+![Écran d'accueil](docs/screenshots/start.png)
+
 ### Données (page *File Select*)
 - CSV / TXT / TSV (délimiteur `,` `;` tabulation `|` détecté automatiquement) et
   Excel (`xlsx`, `xlsm`, `xlsb`, `xls`, `ods`).
@@ -79,14 +87,21 @@ Onglet **Plot Options** : tri par X, nouvelle ligne quand X repart en arrière
 (balayages successifs), lecture des valeurs au survol, réticule, curseurs, export.
 
 Onglet **Trace Options** : palette, épaisseur (2 px par défaut), style de ligne,
-marqueurs, **couleurs des températures** (−40 °C bleu, 25 °C vert, 85 °C rouge
-quand la série est une température), puis
+marqueurs, style **Custom** (motif de tirets modifiable), **styles des
+températures** (quand la série est une température : −40 °C bleu tiret-point,
+25 °C vert plein, 85 °C rouge tirets), puis
 pour chaque courbe : visibilité, couleur, épaisseur, style, marqueur,
 **libellé de légende personnalisé**.
 
 Interaction
-- Molette : zoom · glisser : déplacement · clic droit + glisser : zoom rectangle ·
-  glisser sur un axe : zoom de cet axe · double-clic : vue initiale.
+- **Molette : graphe suivant / précédent** (graphes empilés, liste avec
+  miniatures à gauche, Page Up / Page Down).
+- Ctrl + molette : zoom · glisser : déplacement · clic droit + glisser : zoom
+  rectangle · glisser sur un axe : zoom de cet axe · double-clic : échelle d'origine.
+- Outils : *Pan* / *Zoom area*, zoom + / −, *Fit Y*, *Previous view*,
+  *Original scale*, *Axes & title…*.
+- **Clic sur un axe** : le renommer, régler sa plage et son pas ; **clic sur le
+  titre** : l'éditer.
 - Survol : valeurs x / y de la courbe la plus proche.
 - **Clic sur une courbe : pose un curseur** affichant x / y (re-clic pour l'enlever).
 - **La légende se déplace à la souris** ; déposée contre un bord du graphe, elle
@@ -168,6 +183,7 @@ puis en-tête en ligne 5, 7 SN × 3 températures × 2 tensions VDD) et deux acc
 | `src/data/deembed.rs` | lecture Touchstone `.s2p`, de-embedding vectoriel / scalaire |
 | `src/plot/geom.rs` | géométrie partagée : placement de la légende, décimation, graduations |
 | `src/export/` | écriture PowerPoint (`.pptx`) et ZIP |
-| `src/ui/` | pages de l'interface |
+| `src/ui/` | pages de l'interface (`start.rs` : écran d'accueil des workspaces) |
+| `src/recent.rs` | mémoire des workspaces récents |
 
 Tests : `cargo test`.

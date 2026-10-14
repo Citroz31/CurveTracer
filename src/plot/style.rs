@@ -1,17 +1,68 @@
 //! Resolution of the final style (color, width, label…) of every trace.
 
 use super::compute::PlotData;
-use super::config::{LineKind, MarkerKind, PlotConfig, Rgba};
+use super::config::{DEFAULT_CUSTOM_DASH, LineKind, MarkerKind, PlotConfig, Rgba};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TraceStyle {
     pub color: Rgba,
     pub width: f32,
     pub line: LineKind,
+    /// Dash pattern (dash, gap, …) in multiples of the width; empty = solid.
+    pub dash: Vec<f32>,
     pub marker: MarkerKind,
     pub marker_size: f32,
     pub visible: bool,
     pub label: String,
+}
+
+/// Dash pattern of a line style, in multiples of the line width (even length).
+pub fn dash_for(kind: LineKind, custom: &[f32]) -> Vec<f32> {
+    match kind {
+        LineKind::Dashed => vec![5.0, 3.0],
+        LineKind::Dotted => vec![0.1, 2.5],
+        LineKind::Custom => {
+            let mut d: Vec<f32> = custom.iter().map(|v| v.clamp(0.05, 100.0)).collect();
+            if d.is_empty() {
+                d = DEFAULT_CUSTOM_DASH.to_vec();
+            }
+            if d.len() % 2 == 1 {
+                d.extend(d.clone());
+            }
+            d
+        }
+        LineKind::Solid | LineKind::None => Vec::new(),
+    }
+}
+
+/// Parses a dash pattern written as "6 2.5 1.5 2.5".
+pub fn parse_dash(text: &str) -> Option<Vec<f32>> {
+    let v: Vec<f32> = text
+        .split(|c: char| c.is_whitespace() || c == ',' || c == ';')
+        .filter(|t| !t.is_empty())
+        .map(|t| t.parse::<f32>().ok().filter(|x| *x > 0.0))
+        .collect::<Option<_>>()?;
+    (!v.is_empty() && v.len() <= 16).then_some(v)
+}
+
+pub fn format_dash(d: &[f32]) -> String {
+    d.iter().map(|v| format!("{v}")).collect::<Vec<_>>().join(" ")
+}
+
+/// Standard styles of the usual test temperatures (only for curves whose
+/// single series column is a temperature): -40 °C blue custom dashes,
+/// 25 °C green solid, 85 °C red dashed.
+pub fn temperature_style(series: &[(String, String)]) -> Option<(Rgba, LineKind)> {
+    let c = temperature_color(series)?;
+    let v: f64 = series[0].1.trim().parse().ok()?;
+    let line = if v < 0.0 {
+        LineKind::Custom
+    } else if v > 50.0 {
+        LineKind::Dashed
+    } else {
+        LineKind::Solid
+    };
+    Some((c, line))
 }
 
 /// Standard colors of the usual test temperatures: -40 °C blue, 25 °C green,
@@ -63,13 +114,16 @@ pub fn trace_styles(cfg: &PlotConfig, data: &PlotData) -> Vec<TraceStyle> {
             };
             let mut line = d.line;
             if d.temperature_colors
-                && let Some(c) = temperature_color(&t.series)
+                && let Some((c, l)) = temperature_style(&t.series)
             {
-                color = [c[0], c[1], c[2], color[3]];
-                // several Y columns share the temperature colors: vary the line style
+                // several Y columns share the temperature styles: lighter colors
+                // for the 2nd, 3rd… column
                 let yi = cfg.ys.iter().position(|y| *y == t.y_col).unwrap_or(0);
-                if line == LineKind::Solid && yi > 0 {
-                    line = [LineKind::Dashed, LineKind::Dotted][(yi - 1) % 2];
+                let k = [0.0, 0.45, 0.65, 0.78][yi.min(3)];
+                let mix = |v: u8| (v as f32 + (255.0 - v as f32) * k).round() as u8;
+                color = [mix(c[0]), mix(c[1]), mix(c[2]), color[3]];
+                if line != LineKind::None {
+                    line = l;
                 }
             }
             let mut marker = d.marker;
@@ -100,6 +154,7 @@ pub fn trace_styles(cfg: &PlotConfig, data: &PlotData) -> Vec<TraceStyle> {
                 color,
                 width,
                 line,
+                dash: dash_for(line, &d.custom_dash),
                 marker,
                 marker_size: d.marker_size,
                 visible,
@@ -205,6 +260,21 @@ mod tests {
             ("Set_TempC".to_owned(), "25".to_owned()),
         ];
         assert_eq!(temperature_color(&two), None);
+        assert_eq!(temperature_style(&s("Set_TempC", "-40.0")).unwrap().1, LineKind::Custom);
+        assert_eq!(temperature_style(&s("Set_TempC", "25.0")).unwrap().1, LineKind::Solid);
+        assert_eq!(temperature_style(&s("Set_TempC", "85")).unwrap().1, LineKind::Dashed);
+    }
+
+    #[test]
+    fn dashes() {
+        assert_eq!(parse_dash("6 2.5, 1.5;2.5"), Some(vec![6.0, 2.5, 1.5, 2.5]));
+        assert_eq!(parse_dash("4 x"), None);
+        assert_eq!(parse_dash("4 -1"), None);
+        assert_eq!(
+            dash_for(LineKind::Custom, &[4.0, 1.0, 2.0]),
+            vec![4.0, 1.0, 2.0, 4.0, 1.0, 2.0]
+        );
+        assert!(dash_for(LineKind::Solid, &[1.0]).is_empty());
     }
 
     #[test]

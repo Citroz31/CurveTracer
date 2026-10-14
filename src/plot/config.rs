@@ -422,16 +422,25 @@ pub enum LineKind {
     Solid,
     Dashed,
     Dotted,
+    /// User dash pattern (dash-dot by default).
+    Custom,
     None,
 }
 
 impl LineKind {
-    pub const ALL: [LineKind; 4] = [LineKind::Solid, LineKind::Dashed, LineKind::Dotted, LineKind::None];
+    pub const ALL: [LineKind; 5] = [
+        LineKind::Solid,
+        LineKind::Dashed,
+        LineKind::Dotted,
+        LineKind::Custom,
+        LineKind::None,
+    ];
     pub fn label(&self) -> &'static str {
         match self {
             LineKind::Solid => "Solid",
             LineKind::Dashed => "Dashed",
             LineKind::Dotted => "Dotted",
+            LineKind::Custom => "Custom (dash-dot)",
             LineKind::None => "No line",
         }
     }
@@ -597,6 +606,9 @@ fn gradient(stops: &[Rgba], t: f32) -> Rgba {
     [mix(a[0], b[0]), mix(a[1], b[1]), mix(a[2], b[2]), 255]
 }
 
+/// Long dash, gap, short dash, gap (× line width).
+pub const DEFAULT_CUSTOM_DASH: [f32; 4] = [6.0, 2.5, 1.5, 2.5];
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TraceDefaults {
@@ -605,8 +617,12 @@ pub struct TraceDefaults {
     pub marker: MarkerKind,
     pub marker_size: f32,
     pub palette: Palette,
-    /// -40 °C blue, 25 °C green, 85 °C red when a temperature is the series.
+    /// Temperature as the series: -40 °C blue custom dashes, 25 °C green
+    /// solid, 85 °C red dashed.
     pub temperature_colors: bool,
+    /// Dash pattern of the "Custom" line style: dash, gap, dash, gap…
+    /// (in multiples of the line width).
+    pub custom_dash: Vec<f32>,
 }
 
 impl Default for TraceDefaults {
@@ -618,6 +634,7 @@ impl Default for TraceDefaults {
             marker_size: 3.5,
             palette: Palette::Classic,
             temperature_colors: true,
+            custom_dash: DEFAULT_CUSTOM_DASH.to_vec(),
         }
     }
 }
