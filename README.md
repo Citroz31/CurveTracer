@@ -8,6 +8,8 @@ Pensé pour les fichiers de test RF (S-paramètres, bruit, puissance, IMD…) :
 on charge les fichiers, on ajoute les graphes un par un (X, Y, filtres, séries),
 on règle la mise en page, puis on exporte le tout dans un PowerPoint.
 
+📘 **[Guide utilisateur (PDF)](docs/CurveTracer_Guide_utilisateur.pdf)** · [version en ligne](docs/GUIDE_UTILISATEUR.md) · [⬇ Télécharger CurveTracer.exe](https://github.com/Citroz31/CurveTracer/releases/latest)
+
 ![Page Plots](docs/screenshots/plots.png)
 
 ## Fonctionnalités
@@ -110,11 +112,14 @@ les exports.
 ## Installation
 
 ### Binaire prêt à l'emploi
-Chaque push sur `main` déclenche GitHub Actions (onglet **Actions**) qui compile
-l'application : télécharger l'artefact `CurveTracer-windows-x64` (ou Linux) du
-dernier build réussi, décompresser et lancer `CurveTracer.exe`.
-Pousser un tag `v*` (ex. `v0.1.0`) crée une *release* avec les archives
-Windows / Linux / macOS.
+Télécharger **`CurveTracer.exe`** depuis la page
+[**Releases**](https://github.com/Citroz31/CurveTracer/releases/latest) et le lancer
+(aucune installation). Le **[guide utilisateur (PDF)](docs/CurveTracer_Guide_utilisateur.pdf)**
+y est aussi joint ([version en ligne](docs/GUIDE_UTILISATEUR.md)).
+
+Chaque push sur `main` compile aussi l'application (onglet **Actions**, artefact
+`CurveTracer-windows-x64`) ; pousser un tag `v*` (ex. `v0.1.0`) crée une nouvelle
+*release* avec l'exécutable Windows, le guide et les archives Windows / Linux / macOS.
 
 ### Compilation depuis les sources
 Prérequis : [Rust](https://rustup.rs) ≥ 1.95.

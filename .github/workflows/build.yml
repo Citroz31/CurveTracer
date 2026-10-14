@@ -57,7 +57,7 @@ jobs:
         run: |
           mkdir -p dist/${{ matrix.artifact }}
           cp target/release/${{ matrix.bin }} dist/${{ matrix.artifact }}/
-          cp README.md dist/${{ matrix.artifact }}/
+          cp README.md docs/CurveTracer_Guide_utilisateur.pdf dist/${{ matrix.artifact }}/
           cp -r sample_data dist/${{ matrix.artifact }}/
       - uses: actions/upload-artifact@v4
         with:
@@ -78,7 +78,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist/CurveTracer-macos
-          cp target/release/CurveTracer README.md dist/CurveTracer-macos/
+          cp target/release/CurveTracer README.md docs/CurveTracer_Guide_utilisateur.pdf dist/CurveTracer-macos/
           cp -r sample_data dist/CurveTracer-macos/
       - uses: actions/upload-artifact@v4
         with:
@@ -93,11 +93,20 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: Zip
-        run: cd artifacts && for d in */; do zip -qr "${d%/}.zip" "$d"; done
+        run: |
+          cp artifacts/CurveTracer-windows-x64/CurveTracer.exe artifacts/CurveTracer.exe
+          cp docs/CurveTracer_Guide_utilisateur.pdf artifacts/
+          cd artifacts && for d in */; do zip -qr "${d%/}.zip" "$d"; done
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.zip
+          name: CurveTracer ${{ github.ref_name }}
+          body_path: docs/RELEASE_NOTES.md
+          files: |
+            artifacts/CurveTracer.exe
+            artifacts/CurveTracer_Guide_utilisateur.pdf
+            artifacts/*.zip
