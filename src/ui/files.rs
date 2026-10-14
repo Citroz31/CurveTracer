@@ -2,9 +2,12 @@
 
 use egui::{Align, Layout, RichText, Ui};
 
-use super::{ERR, chip, section, thousands};
-use crate::app::App;
+use super::{ERR, OK_GREEN, WARN, chip, section, thousands};
+use crate::app::{App, DataSource};
 use crate::data::dataset::FileKind;
+use crate::data::deembed::{
+    Correction, DeembedMode, ExtraCorrection, Fixture, FreqUnit, find_freq_column, find_sparam_columns,
+};
 use crate::data::loader::ImportOptions;
 
 fn delimiter_label(d: Option<char>) -> String {
@@ -84,6 +87,251 @@ fn import_options_ui(ui: &mut Ui, id: &str, o: &mut ImportOptions, sheets: &[Str
     changed
 }
 
+/// Picker of a fixture file; returns true when something changed.
+fn fixture_ui(
+    ui: &mut Ui,
+    label: &str,
+    hint: &str,
+    fx: &mut Fixture,
+    last_dir: &mut Option<std::path::PathBuf>,
+) -> bool {
+    let mut changed = false;
+    ui.label(label).on_hover_text(hint);
+    ui.horizontal(|ui| {
+        let name = fx
+            .path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned());
+        match &name {
+            Some(n) => {
+                ui.label(RichText::new(n).strong())
+                    .on_hover_text(fx.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default());
+            }
+            None => {
+                ui.label(RichText::new("none").weak());
+            }
+        }
+        if ui.button("📂 .s2p…").on_hover_text(hint).clicked() {
+            let mut dlg = rfd::FileDialog::new()
+                .set_title(format!("{label}: Touchstone file"))
+                .add_filter("Touchstone two-port", &["s2p", "S2P"])
+                .add_filter("All files", &["*"]);
+            if let Some(d) = last_dir.as_ref() {
+                dlg = dlg.set_directory(d);
+            }
+            if let Some(p) = dlg.pick_file() {
+                if let Some(parent) = p.parent() {
+                    *last_dir = Some(parent.to_path_buf());
+                }
+                fx.path = Some(p);
+                changed = true;
+            }
+        }
+        if name.is_some() && ui.button("🗙").on_hover_text("No fixture on this side").clicked() {
+            fx.path = None;
+            changed = true;
+        }
+        changed |= ui
+            .checkbox(&mut fx.flip, "Flip ports")
+            .on_hover_text("Swap the ports of the file (S11 ↔ S22, S21 ↔ S12) when it was measured the other way round")
+            .changed();
+    });
+    ui.end_row();
+    changed
+}
+
+/// De-embedding settings of a data source.
+/// Returns (settings changed, apply to every source).
+fn deembed_ui(ui: &mut Ui, s: &mut DataSource, last_dir: &mut Option<std::path::PathBuf>) -> (bool, bool) {
+    let mut changed = false;
+    let mut apply_all = false;
+    let id = s.key.clone();
+    let cfg = &mut s.deembed;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("De-embedding of the fixtures").strong());
+        changed |= ui.checkbox(&mut cfg.enabled, "Enabled").changed();
+    });
+    egui::Grid::new(("deembed", &id))
+        .num_columns(2)
+        .spacing([10.0, 4.0])
+        .show(ui, |ui| {
+            changed |= fixture_ui(
+                ui,
+                "Input fixture",
+                "Losses between the instrument and the DUT input: port 1 = instrument, port 2 = DUT",
+                &mut cfg.input,
+                last_dir,
+            );
+            changed |= fixture_ui(
+                ui,
+                "Output fixture",
+                "Losses between the DUT output and the instrument: port 1 = DUT, port 2 = instrument",
+                &mut cfg.output,
+                last_dir,
+            );
+
+            ui.label("Mode");
+            egui::ComboBox::from_id_salt(("deemb_mode", &id))
+                .selected_text(cfg.mode.label())
+                .width(260.0)
+                .show_ui(ui, |ui| {
+                    for m in DeembedMode::ALL {
+                        changed |= ui.selectable_value(&mut cfg.mode, m, m.label()).changed();
+                    }
+                });
+            ui.end_row();
+
+            let cols: Vec<String> = s
+                .base
+                .as_ref()
+                .map(|b| {
+                    b.columns
+                        .iter()
+                        .filter(|c| c.has_numbers())
+                        .map(|c| c.name.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            ui.label("Frequency");
+            ui.horizontal(|ui| {
+                let auto_name = s
+                    .base
+                    .as_ref()
+                    .and_then(|b| find_freq_column(b, "").map(|i| b.columns[i].name.clone()));
+                let shown = if cfg.freq_column.is_empty() {
+                    format!("Auto ({})", auto_name.unwrap_or_else(|| "not found".to_owned()))
+                } else {
+                    cfg.freq_column.clone()
+                };
+                egui::ComboBox::from_id_salt(("deemb_freq", &id))
+                    .selected_text(shown)
+                    .width(170.0)
+                    .show_ui(ui, |ui| {
+                        changed |= ui
+                            .selectable_value(&mut cfg.freq_column, String::new(), "Auto")
+                            .changed();
+                        for c in &cols {
+                            changed |= ui.selectable_value(&mut cfg.freq_column, c.clone(), c).changed();
+                        }
+                    });
+                egui::ComboBox::from_id_salt(("deemb_unit", &id))
+                    .selected_text(cfg.freq_unit.label())
+                    .width(60.0)
+                    .show_ui(ui, |ui| {
+                        for u in FreqUnit::ALL {
+                            changed |= ui.selectable_value(&mut cfg.freq_unit, u, u.label()).changed();
+                        }
+                    });
+            });
+            ui.end_row();
+
+            ui.label("Other columns").on_hover_text(
+                "Columns corrected with the fixture insertion losses (IL, dB, read from S21 of the files)",
+            );
+            ui.vertical(|ui| {
+                let mut remove = None;
+                for (k, e) in cfg.extra.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt(("deemb_xcol", &id, k))
+                            .selected_text(if e.column.is_empty() {
+                                "column…"
+                            } else {
+                                e.column.as_str()
+                            })
+                            .width(170.0)
+                            .show_ui(ui, |ui| {
+                                for c in &cols {
+                                    changed |= ui.selectable_value(&mut e.column, c.clone(), c).changed();
+                                }
+                            });
+                        egui::ComboBox::from_id_salt(("deemb_xkind", &id, k))
+                            .selected_text(e.kind.label())
+                            .width(190.0)
+                            .show_ui(ui, |ui| {
+                                for c in Correction::ALL {
+                                    changed |= ui.selectable_value(&mut e.kind, c, c.label()).changed();
+                                }
+                            });
+                        if ui.small_button("🗙").clicked() {
+                            remove = Some(k);
+                        }
+                    });
+                }
+                if let Some(k) = remove {
+                    cfg.extra.remove(k);
+                    changed = true;
+                }
+                if ui.small_button("+ Add a column (power, gain, NF…)").clicked() {
+                    cfg.extra.push(ExtraCorrection::default());
+                }
+            });
+            ui.end_row();
+        });
+    changed |= ui
+        .checkbox(&mut cfg.keep_raw, "Keep the raw columns (“S21db raw”…)")
+        .changed();
+
+    // detected S-parameter columns
+    if let Some(b) = &s.base {
+        let (db, deg) = find_sparam_columns(b);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Detected:").small());
+            for (k, p) in ["S11", "S21", "S12", "S22"].iter().enumerate() {
+                let txt = match (db[k], deg[k]) {
+                    (Some(_), Some(_)) => format!("{p} dB+deg"),
+                    (Some(_), None) => format!("{p} dB"),
+                    (None, Some(_)) => format!("{p} deg"),
+                    (None, None) => format!("{p} –"),
+                };
+                let color = match (db[k], deg[k]) {
+                    (Some(_), Some(_)) => OK_GREEN,
+                    (None, None) => ui.visuals().weak_text_color(),
+                    _ => WARN,
+                };
+                ui.label(RichText::new(txt).small().color(color));
+            }
+        });
+    }
+    match &s.deembed_report {
+        Some(Ok(r)) => {
+            ui.label(RichText::new(format!("✔ {} · frequency {}", r.summary(), r.freq_column)).color(OK_GREEN));
+            for f in &r.fixtures {
+                ui.label(RichText::new(f).small());
+            }
+            ui.label(
+                RichText::new(format!("Corrected: {}", r.corrected.join(", ")))
+                    .small()
+                    .weak(),
+            );
+            for n in &r.notes {
+                ui.label(RichText::new(format!("⚠ {n}")).small().color(WARN));
+            }
+        }
+        Some(Err(e)) => {
+            ui.label(RichText::new(format!("⚠ {e}")).color(ERR));
+        }
+        None => {}
+    }
+    ui.horizontal(|ui| {
+        if ui
+            .button("⟳ Re-apply")
+            .on_hover_text("Read the fixture files again")
+            .clicked()
+        {
+            changed = true;
+        }
+        if ui
+            .button("Use these fixtures for every data source")
+            .on_hover_text("Copy these de-embedding settings to all the other data sources")
+            .clicked()
+        {
+            apply_all = true;
+        }
+    });
+    (changed, apply_all)
+}
+
 pub fn show(app: &mut App, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     ui.columns(2, |cols| {
@@ -147,6 +395,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let mut reload: Option<usize> = None;
         let mut download: Option<usize> = None;
         let mut view_data: Option<usize> = None;
+        let mut deembed_changed: Option<usize> = None;
+        let mut deembed_all: Option<usize> = None;
+        let mut last_dir = app.export.last_dir.clone();
         egui::ScrollArea::vertical().id_salt("sources_scroll").show(ui, |ui| {
             for i in 0..app.sources.len() {
                 let n_plots = app.plots_using(&app.sources[i].key);
@@ -189,6 +440,24 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                             }
                             chip(ui, format!("{:.0} ms", ds.info.load_ms));
                         }
+                        match &s.deembed_report {
+                            Some(Ok(r)) => {
+                                ui.label(
+                                    RichText::new(if r.vector {
+                                        "De-embedded · vector"
+                                    } else {
+                                        "De-embedded · scalar"
+                                    })
+                                    .small()
+                                    .color(OK_GREEN),
+                                )
+                                .on_hover_text(r.fixtures.join("\n"));
+                            }
+                            Some(Err(_)) => {
+                                ui.label(RichText::new("De-embedding error").small().color(ERR));
+                            }
+                            None => {}
+                        }
                     });
                     if let Some(e) = &s.error {
                         ui.label(RichText::new(format!("⚠ {e}")).color(ERR));
@@ -212,6 +481,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                                 reload = Some(i);
                             }
                             ui.toggle_value(&mut s.show_options, "⚙ Options");
+                            ui.toggle_value(&mut s.show_deembed, "🔌 De-embedding")
+                                .on_hover_text("Remove the losses of the input / output fixtures (.s2p files)");
                         });
                     });
                     if s.show_options {
@@ -221,6 +492,16 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         import_options_ui(ui, &key, &mut s.options, &sheets);
                         if ui.button("Apply & reload").clicked() {
                             reload = Some(i);
+                        }
+                    }
+                    if s.show_deembed {
+                        ui.separator();
+                        let (changed, all) = deembed_ui(ui, s, &mut last_dir);
+                        if changed {
+                            deembed_changed = Some(i);
+                        }
+                        if all {
+                            deembed_all = Some(i);
                         }
                     }
                     if let Some(ds) = &s.ds
@@ -238,6 +519,21 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 ui.add_space(6.0);
             }
         });
+        if last_dir != app.export.last_dir {
+            app.export.last_dir = last_dir;
+        }
+        if let Some(i) = deembed_changed {
+            app.apply_deembed(i);
+        }
+        if let Some(i) = deembed_all {
+            let cfg = app.sources[i].deembed.clone();
+            for j in 0..app.sources.len() {
+                if j != i {
+                    app.sources[j].deembed = cfg.clone();
+                    app.apply_deembed(j);
+                }
+            }
+        }
         if let Some(k) = add_plot_for {
             app.add_plot(&k);
         }

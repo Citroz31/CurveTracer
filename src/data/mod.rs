@@ -1,4 +1,5 @@
 pub mod dataset;
+pub mod deembed;
 pub mod excel;
 pub mod expr;
 pub mod hash;

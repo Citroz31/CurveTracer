@@ -605,16 +605,19 @@ pub struct TraceDefaults {
     pub marker: MarkerKind,
     pub marker_size: f32,
     pub palette: Palette,
+    /// -40 °C blue, 25 °C green, 85 °C red when a temperature is the series.
+    pub temperature_colors: bool,
 }
 
 impl Default for TraceDefaults {
     fn default() -> Self {
         TraceDefaults {
-            width: 1.8,
+            width: 2.0,
             line: LineKind::Solid,
             marker: MarkerKind::None,
             marker_size: 3.5,
             palette: Palette::Classic,
+            temperature_colors: true,
         }
     }
 }

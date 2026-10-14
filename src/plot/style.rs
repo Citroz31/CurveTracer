@@ -14,6 +14,24 @@ pub struct TraceStyle {
     pub label: String,
 }
 
+/// Standard colors of the usual test temperatures: -40 °C blue, 25 °C green,
+/// 85 °C red (only for curves whose single series column is a temperature).
+pub fn temperature_color(series: &[(String, String)]) -> Option<Rgba> {
+    let [(col, val)] = series else {
+        return None;
+    };
+    if !col.to_ascii_lowercase().contains("temp") {
+        return None;
+    }
+    let v: f64 = val.trim().parse().ok()?;
+    const TEMPS: [(f64, Rgba); 3] = [
+        (-40.0, [20, 80, 220, 255]),
+        (25.0, [20, 150, 50, 255]),
+        (85.0, [215, 30, 30, 255]),
+    ];
+    TEMPS.iter().find(|(t, _)| (v - t).abs() < 0.5).map(|(_, c)| *c)
+}
+
 pub fn trace_styles(cfg: &PlotConfig, data: &PlotData) -> Vec<TraceStyle> {
     let d = &cfg.traces;
     let n_orig = data.traces.iter().filter(|t| !t.aggregate).count();
@@ -44,6 +62,16 @@ pub fn trace_styles(cfg: &PlotConfig, data: &PlotData) -> Vec<TraceStyle> {
                 (c, d.width)
             };
             let mut line = d.line;
+            if d.temperature_colors
+                && let Some(c) = temperature_color(&t.series)
+            {
+                color = [c[0], c[1], c[2], color[3]];
+                // several Y columns share the temperature colors: vary the line style
+                let yi = cfg.ys.iter().position(|y| *y == t.y_col).unwrap_or(0);
+                if line == LineKind::Solid && yi > 0 {
+                    line = [LineKind::Dashed, LineKind::Dotted][(yi - 1) % 2];
+                }
+            }
             let mut marker = d.marker;
             let mut visible = true;
             let mut label = t.label.clone();
@@ -165,12 +193,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn temperature_colors() {
+        let s = |c: &str, v: &str| vec![(c.to_owned(), v.to_owned())];
+        assert_eq!(temperature_color(&s("Set_TempC", "-40.0")), Some([20, 80, 220, 255]));
+        assert_eq!(temperature_color(&s("Set_TempC", "25")), Some([20, 150, 50, 255]));
+        assert_eq!(temperature_color(&s("Set_TempC", "85.0")), Some([215, 30, 30, 255]));
+        assert_eq!(temperature_color(&s("Set_TempC", "50")), None);
+        assert_eq!(temperature_color(&s("SN", "25")), None);
+        let two = vec![
+            ("SN".to_owned(), "1".to_owned()),
+            ("Set_TempC".to_owned(), "25".to_owned()),
+        ];
+        assert_eq!(temperature_color(&two), None);
+    }
+
+    #[test]
     fn legend_columns() {
         let m = LegendMetrics::new(10.0, false);
         let g = m.grid(30, 100.0, 0.0, 200.0);
         assert!(g.cols >= 2);
         assert!(g.h <= 200.0);
-        assert_eq!(g.cols * g.rows >= 30, true);
+        assert!(g.cols * g.rows >= 30);
         let (x, y) = m.entry_pos(&g, g.rows + 1);
         assert_eq!(m.entry_at(&g, x + 1.0, y + 1.0, 30), Some(g.rows + 1));
         let g1 = m.grid(3, 100.0, 0.0, 500.0);

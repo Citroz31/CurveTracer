@@ -9,6 +9,7 @@ use std::time::Instant;
 use egui::{Color32, Context, FontData, FontDefinitions, FontFamily};
 use serde::{Deserialize, Serialize};
 
+use crate::data::deembed::{self, DeembedConfig, DeembedReport};
 use crate::data::loader::{ImportOptions, load_path};
 use crate::data::{ColumnKind, Dataset, UserFunction, with_functions};
 use crate::export::plot_settings;
@@ -16,7 +17,7 @@ use crate::export::pptx::{Slide, SlideFormat, build_pptx};
 use crate::fonts::FontBook;
 use crate::plot::compute::{PlotData, traces_to_csv};
 use crate::plot::config::PlotConfig;
-use crate::plot::render::{RenderOptions, render_png};
+use crate::plot::render::{ImageFormat, RenderOptions, render_image, render_png, render_svg};
 use crate::plot::view::PlotState;
 
 pub const WORKSPACE_EXT: &str = "ctw";
@@ -31,15 +32,50 @@ pub struct DataSource {
     pub options: ImportOptions,
     /// Dataset as loaded (no user function).
     pub base: Option<Arc<Dataset>>,
+    /// De-embedding of the fixtures (input / output .s2p files).
+    pub deembed: DeembedConfig,
+    /// Base dataset after de-embedding (when active).
+    pub deembedded: Option<Arc<Dataset>>,
+    pub deembed_report: Option<Result<DeembedReport, String>>,
     /// Dataset with the user function columns.
     pub ds: Option<Arc<Dataset>>,
     pub func_errors: Vec<Option<String>>,
     pub loading: bool,
     pub error: Option<String>,
     pub show_options: bool,
+    pub show_deembed: bool,
 }
 
 impl DataSource {
+    /// Re-applies the de-embedding (reads the fixture files again).
+    pub fn update_deembed(&mut self) {
+        self.deembedded = None;
+        self.deembed_report = None;
+        let Some(base) = &self.base else {
+            return;
+        };
+        if !self.deembed.is_active() {
+            return;
+        }
+        match deembed::apply(base, &self.deembed) {
+            Ok((ds, report)) => {
+                self.deembedded = Some(Arc::new(ds));
+                self.deembed_report = Some(Ok(report));
+            }
+            Err(e) => self.deembed_report = Some(Err(e)),
+        }
+    }
+
+    /// Rebuilds the dataset: base → de-embedding → user functions.
+    pub fn update_functions(&mut self, funcs: &[UserFunction]) {
+        let Some(base) = self.deembedded.as_ref().or(self.base.as_ref()) else {
+            return;
+        };
+        let (ds, errors) = with_functions(base, funcs);
+        self.ds = Some(Arc::new(ds));
+        self.func_errors = errors;
+    }
+
     pub fn name(&self) -> String {
         self.path
             .file_name()
@@ -102,6 +138,10 @@ pub struct ExportSettings {
     pub use_view: bool,
     pub file_name: String,
     pub last_dir: Option<PathBuf>,
+    /// Format of "Download Images".
+    pub image_format: ImageFormat,
+    /// Embed the plots of the PowerPoint as vector (SVG) images, with a PNG fallback.
+    pub pptx_svg: bool,
 }
 
 impl Default for ExportSettings {
@@ -113,6 +153,8 @@ impl Default for ExportSettings {
             use_view: true,
             file_name: "CurveTracer_export".to_owned(),
             last_dir: None,
+            image_format: ImageFormat::Png,
+            pptx_svg: true,
         }
     }
 }
@@ -157,6 +199,7 @@ pub struct Workspace {
 pub struct WorkspaceSource {
     pub path: PathBuf,
     pub options: ImportOptions,
+    pub deembed: DeembedConfig,
 }
 
 pub struct App {
@@ -321,11 +364,15 @@ impl App {
                 path: path.clone(),
                 options,
                 base: None,
+                deembed: DeembedConfig::default(),
+                deembedded: None,
+                deembed_report: None,
                 ds: None,
                 func_errors: Vec::new(),
                 loading: true,
                 error: None,
                 show_options: false,
+                show_deembed: false,
             });
         }
         let opts = self
@@ -347,6 +394,24 @@ impl App {
         if let Some(s) = self.sources.get(i) {
             let (path, opts) = (s.path.clone(), s.options.clone());
             self.add_source(path, Some(opts), ctx);
+        }
+    }
+
+    /// Applies the de-embedding settings of a data source.
+    pub fn apply_deembed(&mut self, i: usize) {
+        let Some(s) = self.sources.get_mut(i) else {
+            return;
+        };
+        s.update_deembed();
+        s.update_functions(&self.functions);
+        let msg = match &s.deembed_report {
+            Some(Ok(r)) => Some((format!("{}: {}", s.name(), r.summary()), false)),
+            Some(Err(e)) => Some((format!("{}: {e}", s.name()), true)),
+            None => None,
+        };
+        match msg {
+            Some((t, err)) => self.set_status(t, err),
+            None => self.set_status(format!("{}: de-embedding off", self.sources[i].name()), false),
         }
     }
 
@@ -394,14 +459,41 @@ impl App {
             })
     }
 
+    /// Source name, with the de-embedding used (plot settings of the exports).
+    pub fn source_description(&self, key: &str) -> String {
+        let name = self.source_name(key);
+        match self
+            .sources
+            .iter()
+            .find(|s| s.key == key)
+            .and_then(|s| s.deembed_report.as_ref())
+        {
+            Some(Ok(r)) => {
+                let files: Vec<String> = [true, false]
+                    .into_iter()
+                    .filter_map(|input| self.fixture_name(key, input))
+                    .collect();
+                format!(
+                    "{name} – de-embedded ({}, {})",
+                    if r.vector { "vector" } else { "scalar" },
+                    files.join(" / ")
+                )
+            }
+            _ => name,
+        }
+    }
+
+    fn fixture_name(&self, key: &str, input: bool) -> Option<String> {
+        let s = self.sources.iter().find(|s| s.key == key)?;
+        let fx = if input { &s.deembed.input } else { &s.deembed.output };
+        let name = fx.path.as_ref()?.file_name()?.to_string_lossy().into_owned();
+        Some(format!("{} {name}", if input { "in" } else { "out" }))
+    }
+
     /// Recomputes the user function columns of every data source.
     pub fn apply_functions(&mut self) {
         for s in &mut self.sources {
-            if let Some(base) = &s.base {
-                let (ds, errors) = with_functions(base, &self.functions);
-                s.ds = Some(Arc::new(ds));
-                s.func_errors = errors;
-            }
+            s.update_functions(&self.functions);
         }
         self.func_dirty = false;
     }
@@ -426,11 +518,9 @@ impl App {
                     if let Some(sheet) = &ds.info.sheet {
                         s.options.sheet = Some(sheet.clone());
                     }
-                    let base = Arc::new(ds);
-                    let (ds, errors) = with_functions(&base, &self.functions);
-                    s.base = Some(base);
-                    s.ds = Some(Arc::new(ds));
-                    s.func_errors = errors;
+                    s.base = Some(Arc::new(ds));
+                    s.update_deembed();
+                    s.update_functions(&self.functions);
                     s.error = None;
                     self.status = Some(Status {
                         text,
@@ -592,6 +682,7 @@ impl App {
                 .map(|s| WorkspaceSource {
                     path: s.path.clone(),
                     options: s.options.clone(),
+                    deembed: s.deembed.clone(),
                 })
                 .collect(),
             functions: self.functions.clone(),
@@ -683,8 +774,11 @@ impl App {
         for s in ws.sources {
             let old_key = s.path.display().to_string();
             let new_key = Self::source_key(&s.path);
-            key_map.push((old_key, new_key));
+            key_map.push((old_key, new_key.clone()));
             self.add_source(s.path, Some(s.options), ctx);
+            if let Some(src) = self.sources.iter_mut().find(|x| x.key == new_key) {
+                src.deembed = s.deembed;
+            }
         }
         for mut cfg in ws.plots {
             if let Some((_, k)) = key_map.iter().find(|(o, n)| *o == cfg.source || *n == cfg.source) {
@@ -727,7 +821,12 @@ impl App {
         for p in self.plots.iter().filter(|p| p.cfg.export) {
             if let Some(d) = &p.state.data {
                 let view = if self.export.use_view { p.state.view } else { None };
-                items.push((p.cfg.clone(), Arc::clone(d), view, self.source_name(&p.cfg.source)));
+                items.push((
+                    p.cfg.clone(),
+                    Arc::clone(d),
+                    view,
+                    self.source_description(&p.cfg.source),
+                ));
             }
         }
         items
@@ -764,6 +863,7 @@ impl App {
         let opts: Vec<RenderOptions> = items.iter().map(|it| self.render_options(it.2)).collect();
         let fonts = Arc::clone(&self.fonts);
         let format = self.export.format;
+        let with_svg = self.export.pptx_svg;
         let title = self.export.file_name.clone();
         let tx = self.task_tx.clone();
         self.busy = Some(format!("Exporting {} slide(s)…", items.len()));
@@ -779,6 +879,7 @@ impl App {
                     Ok(png) => slides.push(Slide {
                         title: cfg.display_title(),
                         png,
+                        svg: with_svg.then(|| render_svg(&img_cfg, data, &fonts, o).into_bytes()),
                         img_w: o.width,
                         img_h: o.height,
                         settings: plot_settings(cfg, data, src),
@@ -803,7 +904,11 @@ impl App {
     }
 
     pub fn export_images_dialog(&mut self) {
-        let mut dlg = rfd::FileDialog::new().set_title("Export the plots as PNG images: choose a folder");
+        let fmt = self.export.image_format;
+        let mut dlg = rfd::FileDialog::new().set_title(format!(
+            "Export the plots as {} images: choose a folder",
+            fmt.ext().to_uppercase()
+        ));
         if let Some(d) = &self.export.last_dir {
             dlg = dlg.set_directory(d);
         }
@@ -820,9 +925,14 @@ impl App {
         std::thread::spawn(move || {
             let mut n = 0;
             for (k, ((cfg, data, _, _), o)) in items.iter().zip(&opts).enumerate() {
-                let file = dir.join(format!("{prefix}_{:02}_{}.png", k + 1, sanitize(&cfg.display_title())));
-                match render_png(cfg, data, &fonts, o)
-                    .and_then(|png| std::fs::write(&file, png).map_err(|e| e.to_string()))
+                let file = dir.join(format!(
+                    "{prefix}_{:02}_{}.{}",
+                    k + 1,
+                    sanitize(&cfg.display_title()),
+                    fmt.ext()
+                ));
+                match render_image(cfg, data, &fonts, o, fmt)
+                    .and_then(|bytes| std::fs::write(&file, bytes).map_err(|e| e.to_string()))
                 {
                     Ok(()) => n += 1,
                     Err(e) => {
@@ -885,8 +995,8 @@ impl App {
         }
     }
 
-    /// Saves one plot as a PNG image.
-    pub fn save_plot_png_dialog(&mut self, i: usize) {
+    /// Saves one plot as a PNG or SVG image.
+    pub fn save_plot_image_dialog(&mut self, i: usize, fmt: ImageFormat) {
         let Some(p) = self.plots.get_mut(i) else {
             return;
         };
@@ -896,17 +1006,27 @@ impl App {
         };
         let cfg = p.cfg.clone();
         let view = p.state.view;
+        let (title, filter) = match fmt {
+            ImageFormat::Png => ("Save the plot as PNG", "PNG image"),
+            ImageFormat::Svg => ("Save the plot as SVG", "SVG vector image"),
+        };
         let mut dlg = rfd::FileDialog::new()
-            .set_title("Save the plot as PNG")
-            .add_filter("PNG image", &["png"])
-            .set_file_name(format!("{}.png", sanitize(&cfg.display_title())));
+            .set_title(title)
+            .add_filter(filter, &[fmt.ext()])
+            .set_file_name(format!("{}.{}", sanitize(&cfg.display_title()), fmt.ext()));
         if let Some(d) = &self.export.last_dir {
             dlg = dlg.set_directory(d);
         }
-        if let Some(path) = dlg.save_file() {
+        if let Some(mut path) = dlg.save_file() {
+            if path.extension().is_none() {
+                path.set_extension(fmt.ext());
+            }
+            if let Some(parent) = path.parent() {
+                self.export.last_dir = Some(parent.to_path_buf());
+            }
             let o = self.render_options(view);
-            match render_png(&cfg, &data, &self.fonts, &o)
-                .and_then(|png| std::fs::write(&path, png).map_err(|e| e.to_string()))
+            match render_image(&cfg, &data, &self.fonts, &o, fmt)
+                .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()))
             {
                 Ok(()) => self.set_status(format!("Image saved to {}", path.display()), false),
                 Err(e) => self.set_status(e, true),

@@ -970,6 +970,11 @@ fn traces_tab(app: &mut App, ui: &mut Ui) {
                 );
                 ui.end_row();
             });
+            ui.checkbox(
+                &mut cfg.traces.temperature_colors,
+                "Temperature colors: −40 °C blue, 25 °C green, 85 °C red",
+            )
+            .on_hover_text("Used when a temperature column (e.g. Set_TempC) is the series of the plot");
             if ui.button("Apply these defaults to all plots").clicked() {
                 apply_all = true;
             }

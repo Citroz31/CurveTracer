@@ -30,6 +30,9 @@ impl SlideFormat {
 pub struct Slide {
     pub title: String,
     pub png: Vec<u8>,
+    /// Vector version of the plot: embedded as SVG with the PNG as fallback
+    /// (PowerPoint 2016+ / Microsoft 365 show the SVG).
+    pub svg: Option<Vec<u8>>,
     pub img_w: u32,
     pub img_h: u32,
     /// (heading, text) pairs shown next to the plot.
@@ -101,8 +104,13 @@ fn slide_xml(slide: &Slide, index: usize, format: SlideFormat) -> String {
     }
     let x = margin + (pic_area_w - cx) / 2;
     let y = top + (avail_h - cy) / 2;
+    let blip = if slide.svg.is_some() {
+        r#"<a:blip r:embed="rId2"><a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="rId3"/></a:ext></a:extLst></a:blip>"#
+    } else {
+        r#"<a:blip r:embed="rId2"/>"#
+    };
     shapes.push_str(&format!(
-        r#"<p:pic><p:nvPicPr><p:cNvPr id="3" name="Plot {index}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln w="6350"><a:solidFill><a:srgbClr val="D0D5DD"/></a:solidFill></a:ln></p:spPr></p:pic>"#
+        r#"<p:pic><p:nvPicPr><p:cNvPr id="3" name="Plot {index}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill>{blip}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln w="6350"><a:solidFill><a:srgbClr val="D0D5DD"/></a:solidFill></a:ln></p:spPr></p:pic>"#
     ));
 
     if with_settings {
@@ -176,7 +184,7 @@ pub fn build_pptx(slides: &[Slide], doc_title: &str, format: SlideFormat) -> Vec
 
     // [Content_Types].xml
     let mut ct = format!(
-        r#"{XML_HEAD}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/><Override PartName="/ppt/presProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presProps+xml"/><Override PartName="/ppt/viewProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.viewProps+xml"/><Override PartName="/ppt/tableStyles.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>"#
+        r#"{XML_HEAD}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="svg" ContentType="image/svg+xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/><Override PartName="/ppt/presProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presProps+xml"/><Override PartName="/ppt/viewProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.viewProps+xml"/><Override PartName="/ppt/tableStyles.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>"#
     );
     for i in 1..=n {
         ct.push_str(&format!(
@@ -328,22 +336,27 @@ pub fn build_pptx(slides: &[Slide], doc_title: &str, format: SlideFormat) -> Vec
     for (i, s) in slides.iter().enumerate() {
         let k = i + 1;
         z.add(&format!("ppt/slides/slide{k}.xml"), slide_xml(s, k, format).as_bytes());
-        z.add(
-            &format!("ppt/slides/_rels/slide{k}.xml.rels"),
-            rels(&[
-                (
-                    "rId1".into(),
-                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout",
-                    "../slideLayouts/slideLayout1.xml".into(),
-                ),
-                (
-                    "rId2".into(),
-                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
-                    format!("../media/image{k}.png"),
-                ),
-            ])
-            .as_bytes(),
-        );
+        let mut r = vec![
+            (
+                "rId1".into(),
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout",
+                "../slideLayouts/slideLayout1.xml".into(),
+            ),
+            (
+                "rId2".into(),
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+                format!("../media/image{k}.png"),
+            ),
+        ];
+        if let Some(svg) = &s.svg {
+            r.push((
+                "rId3".into(),
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+                format!("../media/image{k}.svg"),
+            ));
+            z.add(&format!("ppt/media/image{k}.svg"), svg);
+        }
+        z.add(&format!("ppt/slides/_rels/slide{k}.xml.rels"), rels(&r).as_bytes());
         z.add(&format!("ppt/media/image{k}.png"), &s.png);
     }
     z.finish()
@@ -364,6 +377,7 @@ mod tests {
         let slides = vec![Slide {
             title: "S21 <dB>".into(),
             png,
+            svg: Some(b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".to_vec()),
             img_w: 1600,
             img_h: 1000,
             settings: vec![("Source".into(), "file.csv".into())],
@@ -373,5 +387,7 @@ mod tests {
         let s = String::from_utf8_lossy(&bytes);
         assert!(s.contains("ppt/slides/slide1.xml"));
         assert!(s.contains("S21 &lt;dB&gt;"));
+        assert!(s.contains("ppt/media/image1.svg"));
+        assert!(s.contains("asvg:svgBlip"));
     }
 }

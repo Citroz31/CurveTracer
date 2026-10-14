@@ -1,4 +1,4 @@
-//! "Export" page: plot thumbnails, slide titles, PowerPoint / PNG / CSV export.
+//! "Export" page: plot thumbnails, slide titles, PowerPoint / PNG / SVG / CSV export.
 
 use std::sync::Arc;
 
@@ -7,6 +7,7 @@ use egui::{Align2, Color32, FontId, RichText, Sense, Ui, Vec2};
 use super::{NAVY, section};
 use crate::app::App;
 use crate::export::pptx::SlideFormat;
+use crate::plot::render::ImageFormat;
 use crate::plot::view::show_plot;
 
 pub fn show(app: &mut App, ui: &mut Ui) {
@@ -137,6 +138,18 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.label("File name");
             ui.add(egui::TextEdit::singleline(&mut app.export.file_name).desired_width(320.0));
         });
+        ui.horizontal(|ui| {
+            ui.label("Images");
+            for f in ImageFormat::ALL {
+                ui.radio_value(&mut app.export.image_format, f, f.label());
+            }
+            ui.add_space(16.0);
+            ui.checkbox(&mut app.export.pptx_svg, "Vector (SVG) plots in the PowerPoint")
+                .on_hover_text(
+                    "The slides embed each plot as an SVG image (sharp at any zoom, can be converted to shapes in PowerPoint) \
+                     with a PNG copy for the applications that do not read SVG.",
+                );
+        });
         ui.add_space(4.0);
         let busy = app.busy.is_some();
         ui.horizontal(|ui| {
@@ -154,7 +167,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             if ui
                 .add_enabled(
                     !busy && selected > 0,
-                    egui::Button::new("🖼  Download Images (PNG)").min_size(Vec2::new(200.0, 34.0)),
+                    egui::Button::new(format!(
+                        "🖼  Download Images ({})",
+                        app.export.image_format.ext().to_uppercase()
+                    ))
+                    .min_size(Vec2::new(200.0, 34.0)),
                 )
                 .clicked()
             {

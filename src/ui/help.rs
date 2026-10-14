@@ -12,6 +12,10 @@ pub fn show(ui: &mut Ui) {
             ui.label("• Open or drag & drop CSV / TXT / Excel files. Several sources can be loaded at the same time.");
             ui.label("• The delimiter and the header line are detected automatically; the metadata lines written above the column names are kept as “File information”.");
             ui.label("• ⚙ Options lets you force the delimiter, the header line, the decimal comma or the Excel sheet.");
+            ui.label("• 🔌 De-embedding removes the input / output fixtures (cables, probes, test board) described by .s2p files:");
+            ui.label("    vector (T-matrices) when the data has S11db/S11deg … S22db/S22deg and the files have phases, scalar (dB losses) otherwise.");
+            ui.label("    Input file: port 1 = instrument, port 2 = DUT · output file: port 1 = DUT, port 2 = instrument (“Flip ports” otherwise).");
+            ui.label("    The columns are corrected in place (plots update), the raw values are kept as “S21db raw”…; power, gain or NF columns can be corrected too.");
         });
         section(ui, "2. Add plots one by one", |ui| {
             ui.label("• Click “Add Plot” on a data source, then in Data → Select Data:");
@@ -32,13 +36,15 @@ pub fn show(ui: &mut Ui) {
         section(ui, "4. Layout & traces", |ui| {
             ui.label("• Layout: title, axis labels and their fonts / sizes / colors, tick fonts, ranges, tick steps, decimals, grid, legend.");
             ui.label("• Trace Options: palette, widths, line styles, markers, custom legend labels, visibility of each curve.");
+            ui.label("• Temperatures as series: −40 °C blue, 25 °C green, 85 °C red by default (Trace Options → Temperature colors).");
             ui.label("• Fonts: Arial, Calibri, Times New Roman… are used when installed; File → Load a font file adds any .ttf/.otf.");
         });
         section(ui, "5. User functions", |ui| {
             ui.label("• Functions page: new columns computed from formulas, e.g. Frequency (GHz) = [Freq] / 1e9, Gain = [S21db] - [Thru Loss].");
         });
         section(ui, "6. Export", |ui| {
-            ui.label("• Export page: choose the plots and the slide titles, then Download PowerPoint (one 16:9 slide per plot), PNG images or the plot data as CSV.");
+            ui.label("• Export page: choose the plots and the slide titles, then Download PowerPoint (one 16:9 slide per plot), PNG or SVG images or the plot data as CSV.");
+            ui.label("• The PowerPoint embeds vector (SVG) plots with a PNG copy; the PNG / SVG buttons of the Plots page save the current plot.");
             ui.label("• Save the workspace (QuickSave / Ctrl+S) to find all the plots again later.");
         });
         ui.add_space(8.0);

@@ -246,7 +246,14 @@ pub fn decimals_for_step(step: f64) -> usize {
 pub fn format_tick(v: f64, decimals: usize) -> String {
     let a = v.abs();
     if a != 0.0 && !(1e-6..1e9).contains(&a) {
-        return format!("{v:.*e}", decimals.min(3));
+        // shortest mantissa that keeps neighbouring ticks distinct (2.5e9, 1.25e10)
+        for p in 0..6 {
+            let t = format!("{v:.p$e}");
+            if t.parse::<f64>().is_ok_and(|r| (r - v).abs() <= a * 1e-9) {
+                return t;
+            }
+        }
+        return format!("{v:.6e}");
     }
     let s = format!("{v:.decimals$}");
     if s.starts_with('-') && s[1..].chars().all(|c| c == '0' || c == '.') {
@@ -313,6 +320,9 @@ mod tests {
         assert_eq!(decimals_for_step(5.0), 0);
         assert_eq!(format_tick(-0.0, 1), "0.0");
         assert_eq!(format_tick(2.5, 2), "2.50");
+        assert_eq!(format_tick(1.25e10, 0), "1.25e10");
+        assert_eq!(format_tick(1.5e10, 0), "1.5e10");
+        assert_eq!(format_tick(2e9, 0), "2e9");
         assert!(is_multiple(45.0, 5.0));
         assert!(!is_multiple(46.0, 5.0));
     }

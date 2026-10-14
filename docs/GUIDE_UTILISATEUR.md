@@ -1,6 +1,6 @@
 ---
 title: "CurveTracer — Guide utilisateur"
-subtitle: "Version 0.1.0"
+subtitle: "Version 0.2.0"
 ---
 
 # 1. Présentation
@@ -12,7 +12,12 @@ de façon rapide et interactive. Le principe :
 2. on **ajoute les graphes un par un** (page *Plots*) en choisissant X, Y, des
    filtres et des séries ;
 3. on règle la **mise en page** (titres, polices, graduations, légende…) ;
-4. on **exporte** en PowerPoint, en images PNG ou en CSV (page *Export*).
+4. on **exporte** en PowerPoint, en images PNG / SVG ou en CSV (page *Export*).
+
+Nouveautés de la version 0.2.0 : **de-embedding** des pertes d'entrée / sortie
+à partir de fichiers `.s2p` (§ 3.1), **couleurs par défaut des températures**
+(−40 °C bleu, 25 °C vert, 85 °C rouge) et traits de 2 px (§ 5.6), **export SVG**
+(vectoriel) des graphes et dans le PowerPoint (§ 5 et § 8).
 
 L'interface est organisée en pages, accessibles par la barre de navigation à
 droite de la fenêtre :
@@ -23,7 +28,7 @@ droite de la fenêtre :
 | **Data** | consulter le contenu brut d'un fichier |
 | **Functions** | créer des colonnes calculées (formules) |
 | **Plots** | créer et régler les graphes |
-| **Export** | exporter en PowerPoint / PNG / CSV |
+| **Export** | exporter en PowerPoint / PNG / SVG / CSV |
 | **Help** | aide-mémoire intégré |
 
 La barre du haut contient le menu **File** (ouvrir des fichiers, ouvrir /
@@ -69,9 +74,70 @@ l'espace de travail.
   - **⚙ Options** : force le délimiteur, la ligne d'en-tête (numéro de ligne,
     0 = pas d'en-tête), la virgule décimale ou la feuille Excel, puis
     **Apply & reload** ;
+  - **🔌 De-embedding** : retire les pertes des accès d'entrée / sortie
+    (voir § 3.1) ;
   - **⟳** recharger le fichier, **🗑** le retirer du projet.
 - **Import options (for the next files)** : mêmes réglages, appliqués aux
   prochains fichiers ouverts.
+
+## 3.1 De-embedding des accès (fichiers `.s2p`)
+
+Le bouton **🔌 De-embedding** d'un fichier de données ouvre le panneau qui
+retire l'effet des **accès de mesure** (câbles, sondes, carte de test…) placés
+entre l'instrument et le composant (DUT), décrits par des fichiers Touchstone
+deux-ports `.s2p`.
+
+![Panneau de de-embedding](screenshots/deembedding.png)
+
+- **Enabled** : active / désactive le de-embedding (les données brutes sont
+  rétablies quand il est désactivé).
+- **Input fixture** : fichier `.s2p` de l'accès d'**entrée** — port 1 côté
+  instrument, port 2 côté DUT.
+- **Output fixture** : fichier `.s2p` de l'accès de **sortie** — port 1 côté
+  DUT, port 2 côté instrument. Un seul des deux fichiers peut être donné.
+- **Flip ports** : à cocher si le fichier a été mesuré dans l'autre sens
+  (échange S11 ↔ S22 et S21 ↔ S12).
+- **Mode** :
+  - **Auto** : **vectoriel** si les données contiennent le module **et la
+    phase** des quatre paramètres (`S11db`, `S11deg`, `S21db`, `S21deg`,
+    `S12db`, `S12deg`, `S22db`, `S22deg`) et si les fichiers `.s2p` ont des
+    phases ; **scalaire** sinon ;
+  - **Vector** : impose le calcul vectoriel par matrices de transfert
+    T : `T_DUT = T_in⁻¹ · T_mesure · T_out⁻¹` (corrige aussi les
+    désadaptations des accès) ;
+  - **Scalar** : soustraction des pertes en dB (accès supposés adaptés) :
+    `S21 − S21_in − S21_out`, `S12 − S12_in − S12_out`,
+    `S11 − (S21_in + S12_in)`, `S22 − (S21_out + S12_out)` ; les phases sont
+    corrigées de la même façon si les fichiers en contiennent.
+- **Frequency** : colonne des fréquences (détectée automatiquement : `Freq`,
+  `Frequency`…) et son unité (**Auto** : Hz, MHz ou GHz déduits des valeurs).
+  Les fichiers `.s2p` sont interpolés (dB et phase dépliée) à chaque fréquence
+  de mesure ; hors de leur plage, le point le plus proche est utilisé et un
+  avertissement est affiché.
+- **Other columns** : d'autres colonnes peuvent être corrigées avec les pertes
+  d'insertion (IL, en dB positifs, lues dans S21 des fichiers) :
+  puissance d'entrée (− IL in), puissance de sortie (+ IL out),
+  gain (+ IL in + IL out), facteur de bruit (− IL in), pertes en réflexion
+  d'entrée / de sortie (+ 2·IL).
+- **Keep the raw columns** : les colonnes sont **corrigées en place** (les
+  graphes existants affichent donc directement les valeurs de-embeddées) et
+  une copie des valeurs brutes est ajoutée (`S21db raw`, `S11deg raw`…) pour
+  comparer.
+- La ligne **Detected** indique les colonnes S-paramètres trouvées (vert : dB
+  et phase). Le résultat affiche le mode utilisé, les fichiers (nombre de
+  points, plage de fréquences, présence de phase) et les colonnes corrigées ;
+  l'étiquette *De-embedded · vector / scalar* apparaît sur le fichier.
+- **⟳ Re-apply** relit les fichiers `.s2p` (s'ils ont été modifiés) ;
+  **Use these fixtures for every data source** copie ces réglages sur tous les
+  fichiers du projet.
+
+Les réglages de de-embedding sont enregistrés dans l'espace de travail, et
+rappelés dans les diapositives au format *Plot + Settings*.
+
+![S21 de-embeddé (traits pleins) et brut (tirets)](screenshots/deembedding_plot.png)
+
+Deux fichiers d'exemple sont fournis : `sample_data/fixture_input.s2p` et
+`sample_data/fixture_output.s2p`.
 
 # 4. Consulter les données (page *Data*)
 
@@ -95,7 +161,8 @@ et **Delete**.
 La barre d'outils au-dessus du graphe contient : le **nom** du graphe, un
 résumé (nombre de courbes, de points, de lignes retenues, temps de calcul), et
 les boutons **⟲** (réinitialiser la vue), **Copy / Split Plot**, **PNG**
-(image haute résolution), **Download Data** (courbes en CSV) et **🗑**.
+(image haute résolution), **SVG** (image vectorielle, modifiable dans
+Inkscape, Illustrator ou PowerPoint), **Download Data** (courbes en CSV) et **🗑**.
 
 Le panneau de droite contient quatre onglets : **Data**, **Layout**,
 **Plot Options**, **Trace Options**.
@@ -193,9 +260,13 @@ Les polices proposées : *Proportional*, *Monospace*, et les polices installées
 
 ![Onglet Trace Options](screenshots/traces.png)
 
-- **Defaults** : palette de couleurs, épaisseur, style de trait (plein, tirets,
-  pointillés, aucun), marqueurs et leur taille ; **Apply these defaults to all
-  plots**.
+- **Defaults** : palette de couleurs, épaisseur (**2 px** par défaut), style
+  de trait (plein, tirets, pointillés, aucun), marqueurs et leur taille ;
+  **Apply these defaults to all plots**.
+- **Temperature colors** (coché par défaut) : quand la série est une
+  température (`Set_TempC`, `DUT_TempC`…), la courbe à **−40 °C est bleue**,
+  celle à **25 °C verte** et celle à **85 °C rouge**. Si plusieurs colonnes Y
+  sont tracées, la 2ᵉ est en tirets et la 3ᵉ en pointillés pour les distinguer.
 - **Curves** : pour chaque courbe — visibilité, couleur, épaisseur, style,
   marqueur et **libellé de légende personnalisé**. **Show all / Hide all /
   Reset** agissent sur toutes les courbes.
@@ -263,11 +334,17 @@ Exemples :
 - **Slide format** : *Plot only* ou *Plot + Settings* (ajoute à droite la
   source, X, Y, séries, filtres et traitement).
 - **Image size** : résolution des images (1600 × 1000 par défaut).
+- **Images** : format des images exportées, **PNG** (bitmap) ou **SVG**
+  (vectoriel : traits et textes nets à tous les zooms, textes modifiables).
+- **Vector (SVG) plots in the PowerPoint** (coché par défaut) : chaque
+  diapositive contient le graphe en **SVG** (PowerPoint 2016 / Microsoft 365 :
+  net à tous les zooms, *Convertir en forme* pour le modifier), avec une copie
+  PNG pour les logiciels qui ne lisent pas le SVG.
 - **Use the current zoom of each plot** : exporte la vue affichée plutôt que la
   plage complète.
 - **File name**, puis :
   - **Download PowerPoint** : un fichier `.pptx`, une diapositive 16:9 par graphe ;
-  - **Download Images (PNG)** : une image par graphe dans le dossier choisi ;
+  - **Download Images (PNG / SVG)** : une image par graphe dans le dossier choisi ;
   - **Download Data (CSV)** : les points de chaque graphe (colonnes *Trace, X, Y*).
 
 ![Diapositive générée](screenshots/slide-1.png)
@@ -301,6 +378,16 @@ d'en-tête, puis *Apply & reload*.
 
 **Les nombres avec une virgule ne sont pas reconnus.**
 *⚙ Options → Decimal comma → Yes*.
+
+**Le de-embedding affiche « frequencies outside the fixture files ».**
+L'unité de fréquence est probablement mal déduite : la choisir dans
+*Frequency* (Hz, MHz, GHz), ou vérifier que les fichiers `.s2p` couvrent la
+plage mesurée.
+
+**Le de-embedding est scalaire alors que j'attends du vectoriel.**
+Il faut les colonnes dB **et** phase des quatre paramètres (S11, S21, S12,
+S22) et des phases non nulles dans les deux fichiers `.s2p` : la ligne
+*Detected* et le message sous le résultat indiquent ce qui manque.
 
 **La légende cache les courbes.**
 La déplacer à la souris, ou la poser contre le bord droit / bas pour la sortir

@@ -26,6 +26,20 @@ on règle la mise en page, puis on exporte le tout dans un PowerPoint.
   feuille Excel) + rechargement.
 - Plusieurs sources de données simultanées, glisser-déposer des fichiers sur la fenêtre.
 
+### De-embedding des accès (`.s2p`)
+- Bouton **🔌 De-embedding** de chaque fichier : fichiers Touchstone deux-ports
+  d'**entrée** (instrument → DUT) et de **sortie** (DUT → instrument), option
+  *Flip ports* (formats MA / DB / RI, Hz…GHz, Touchstone v1 et v2).
+- **Vectoriel** (matrices de transfert T) quand les données contiennent module
+  et phase des quatre paramètres (`S11db`, `S11deg` … `S22deg`) et que les
+  fichiers ont des phases, **scalaire** (soustraction des pertes en dB) sinon.
+- Interpolation en fréquence (dB et phase dépliée), unité détectée.
+- Colonnes corrigées en place (les graphes se mettent à jour), copie des
+  valeurs brutes (`S21db raw`) ; correction optionnelle d'autres colonnes
+  (puissances d'entrée / sortie, gain, NF).
+
+![De-embedding](docs/screenshots/deembedding.png)
+
 ### Performances
 - Chargement **multi-cœur** : le fichier est découpé en blocs analysés en
   parallèle ; chaque colonne est encodée en dictionnaire (une recherche de hachage
@@ -64,7 +78,9 @@ Bouton « Apply this layout to all plots ».
 Onglet **Plot Options** : tri par X, nouvelle ligne quand X repart en arrière
 (balayages successifs), lecture des valeurs au survol, réticule, curseurs, export.
 
-Onglet **Trace Options** : palette, épaisseur, style de ligne, marqueurs, puis
+Onglet **Trace Options** : palette, épaisseur (2 px par défaut), style de ligne,
+marqueurs, **couleurs des températures** (−40 °C bleu, 25 °C vert, 85 °C rouge
+quand la série est une température), puis
 pour chaque courbe : visibilité, couleur, épaisseur, style, marqueur,
 **libellé de légende personnalisé**.
 
@@ -91,7 +107,9 @@ crochets (`[VDD Supply Current [A]]`) ou directement s'ils sont simples (`S21db`
 - **Download PowerPoint** : une diapositive 16:9 par graphe (titre + image haute
   résolution), format *Plot only* ou *Plot + Settings* (source, X, Y, séries,
   filtres, traitement).
-- **Download Images** (PNG haute résolution) et **Download Data** (CSV des courbes).
+- Graphes intégrés en **SVG vectoriel** (avec copie PNG de secours) dans le PowerPoint.
+- **Download Images** (PNG haute résolution ou **SVG** vectoriel) et **Download Data** (CSV des courbes).
+- Boutons **PNG** / **SVG** de la page *Plots* pour enregistrer le graphe affiché.
 - Option « Use the current zoom of each plot » pour exporter exactement la vue affichée.
 
 ![Export](docs/screenshots/export.png)
@@ -133,9 +151,10 @@ cargo run --release
 Sous Linux, quelques bibliothèques système peuvent être nécessaires :
 `sudo apt install libxkbcommon-dev libwayland-dev`.
 
-Un fichier d'exemple est fourni : `sample_data/CGY2272_S-Parameters_example.csv`
+Des fichiers d'exemple sont fournis : `sample_data/CGY2272_S-Parameters_example.csv`
 (données synthétiques, même structure qu'un fichier de S-paramètres : métadonnées
-puis en-tête en ligne 5, 7 SN × 3 températures × 2 tensions VDD).
+puis en-tête en ligne 5, 7 SN × 3 températures × 2 tensions VDD) et deux accès
+`sample_data/fixture_input.s2p` / `fixture_output.s2p` pour essayer le de-embedding.
 
 ## Organisation du code
 
@@ -145,7 +164,8 @@ puis en-tête en ligne 5, 7 SN × 3 températures × 2 tensions VDD).
 | `src/plot/config.rs` | description d'un graphe (sérialisée dans les espaces de travail) |
 | `src/plot/compute.rs` | filtres → séries → agrégations → segments de courbes |
 | `src/plot/view.rs` | graphe interactif (egui_plot), légende déplaçable, curseurs |
-| `src/plot/render.rs` | rendu PNG haute résolution (tiny-skia + ab_glyph) pour les exports |
+| `src/plot/render.rs` | rendu PNG (tiny-skia + ab_glyph) et SVG pour les exports |
+| `src/data/deembed.rs` | lecture Touchstone `.s2p`, de-embedding vectoriel / scalaire |
 | `src/plot/geom.rs` | géométrie partagée : placement de la légende, décimation, graduations |
 | `src/export/` | écriture PowerPoint (`.pptx`) et ZIP |
 | `src/ui/` | pages de l'interface |

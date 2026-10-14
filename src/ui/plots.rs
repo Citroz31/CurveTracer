@@ -6,6 +6,7 @@ use egui::{Align, Layout, RichText, Ui};
 
 use super::{ERR, WARN, plot_settings, section, thousands};
 use crate::app::App;
+use crate::plot::render::ImageFormat;
 use crate::plot::view::show_plot;
 
 pub fn show(app: &mut App, ui: &mut Ui) {
@@ -134,6 +135,13 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 action = Some("csv");
             }
             if ui
+                .button("SVG")
+                .on_hover_text("Save this plot as a vector image (SVG: editable in Inkscape, PowerPoint, Illustrator…)")
+                .clicked()
+            {
+                action = Some("svg");
+            }
+            if ui
                 .button("🖼 PNG")
                 .on_hover_text("Save this plot as a high resolution image")
                 .clicked()
@@ -162,7 +170,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             return;
         }
         Some("csv") => app.save_plot_csv_dialog(i),
-        Some("png") => app.save_plot_png_dialog(i),
+        Some("png") => app.save_plot_image_dialog(i, ImageFormat::Png),
+        Some("svg") => app.save_plot_image_dialog(i, ImageFormat::Svg),
         Some("dup") => {
             app.duplicate_plot(i);
             return;
