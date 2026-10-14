@@ -1,0 +1,148 @@
+# CurveTracer
+
+Outil de tracé de courbes **rapide et interactif** à partir de fichiers de mesures
+CSV / Excel, écrit en **Rust** (interface [egui](https://github.com/emilk/egui) +
+[egui_plot](https://github.com/emilk/egui_plot)).
+
+Pensé pour les fichiers de test RF (S-paramètres, bruit, puissance, IMD…) :
+on charge les fichiers, on ajoute les graphes un par un (X, Y, filtres, séries),
+on règle la mise en page, puis on exporte le tout dans un PowerPoint.
+
+![Page Plots](docs/screenshots/plots.png)
+
+## Fonctionnalités
+
+### Données (page *File Select*)
+- CSV / TXT / TSV (délimiteur `,` `;` tabulation `|` détecté automatiquement) et
+  Excel (`xlsx`, `xlsm`, `xlsb`, `xls`, `ods`).
+- **Détection automatique de la ligne d'en-tête** : les lignes de métadonnées
+  écrites au-dessus des noms de colonnes (Test Request ID, Part Number…) sont
+  ignorées et conservées dans « File information ».
+- Virgule décimale (`1,5`) gérée automatiquement, valeurs `N/A` acceptées,
+  zéros de tête conservés (SN `07102601`).
+- Options forçables par fichier (délimiteur, ligne d'en-tête, virgule décimale,
+  feuille Excel) + rechargement.
+- Plusieurs sources de données simultanées, glisser-déposer des fichiers sur la fenêtre.
+
+### Performances
+- Chargement **multi-cœur** : le fichier est découpé en blocs analysés en
+  parallèle ; chaque colonne est encodée en dictionnaire (une recherche de hachage
+  par cellule, conversion numérique une seule fois par valeur unique).
+  Ordre de grandeur : 500 000 lignes × 29 colonnes (120 Mo) chargées en < 1 s,
+  ~60 Mo en mémoire.
+- Calcul des courbes (filtres, séries, agrégations) en tâche de fond : l'interface
+  ne se fige jamais (4 ms pour filtrer/grouper 500 000 lignes).
+- Affichage des très grosses courbes par décimation min/max adaptée au zoom
+  (visuellement sans perte).
+
+### Graphes (page *Plots*)
+Onglet **Data**
+- **Select Data** : source de données, colonnes (triables par nom ou nombre de
+  valeurs uniques, recherche), à glisser-déposer ou via les boutons `X` `Y` `F` `S` :
+  - **X-Data** (limite 1) avec **modificateur** : `÷1e9 (Hz → GHz)`, `÷1e6`,
+    `÷1e3`, `×1e3 (A → mA)`, `×1e6`, `×1e9`, facteur personnalisé —
+    le libellé d'axe s'adapte (`Freq (GHz)`, `Courant [mA]`) ;
+  - **Y-Data** : une ou plusieurs colonnes (même modificateur possible) ;
+  - **Filter** : sélection de valeurs (cases à cocher, *All / None / Invert / only*,
+    recherche) ou plage numérique `[min, max]` ;
+  - **Series** : une courbe par valeur (SN, température, part number…),
+    plusieurs colonnes combinables.
+- **Process Data** : moyenne, médiane, min, max, somme, RMS, écart-type,
+  étendue, comptage — par X, en regroupant les séries choisies
+  (ex. moyenne sur les SN → une courbe par température), avec ou sans les courbes
+  d'origine.
+- **View Data** : table (virtualisée) des lignes utilisées par le graphe.
+
+Onglet **Layout** : titre (affiché ou non), libellés X / Y, police / taille / couleur
+des titres, des libellés et des graduations, plages d'affichage (auto ou manuelles,
+bouton « Use current zoom »), pas des graduations X / Y, nombre de décimales,
+grille, légende (position, titre, police, fond, bordure), couleurs.
+Bouton « Apply this layout to all plots ».
+
+Onglet **Plot Options** : tri par X, nouvelle ligne quand X repart en arrière
+(balayages successifs), lecture des valeurs au survol, réticule, curseurs, export.
+
+Onglet **Trace Options** : palette, épaisseur, style de ligne, marqueurs, puis
+pour chaque courbe : visibilité, couleur, épaisseur, style, marqueur,
+**libellé de légende personnalisé**.
+
+Interaction
+- Molette : zoom · glisser : déplacement · clic droit + glisser : zoom rectangle ·
+  glisser sur un axe : zoom de cet axe · double-clic : vue initiale.
+- Survol : valeurs x / y de la courbe la plus proche.
+- **Clic sur une courbe : pose un curseur** affichant x / y (re-clic pour l'enlever).
+- **La légende se déplace à la souris** ; déposée contre un bord du graphe, elle
+  passe **à l'extérieur du cadre et le graphe se redimensionne** automatiquement.
+  Un clic sur une entrée masque / affiche la courbe. Au-delà d'une certaine hauteur,
+  la légende se répartit sur plusieurs colonnes.
+
+![Process Data](docs/screenshots/process.png)
+
+### Fonctions utilisateur (page *Functions*)
+Colonnes calculées par formule, disponibles dans toutes les sources :
+`[Freq] / 1e9`, `[S21db] - [Thru Loss]`, `db20(...)`, `lin10(...)`, `dbm2w(...)`,
+`sqrt`, `log10`, `abs`, `min`, `max`, `^`… Les noms de colonnes s'écrivent entre
+crochets (`[VDD Supply Current [A]]`) ou directement s'ils sont simples (`S21db`).
+
+### Export (page *Export*)
+- Miniatures de tous les graphes, sélection, titre de chaque diapositive.
+- **Download PowerPoint** : une diapositive 16:9 par graphe (titre + image haute
+  résolution), format *Plot only* ou *Plot + Settings* (source, X, Y, séries,
+  filtres, traitement).
+- **Download Images** (PNG haute résolution) et **Download Data** (CSV des courbes).
+- Option « Use the current zoom of each plot » pour exporter exactement la vue affichée.
+
+![Export](docs/screenshots/export.png)
+![Diapositive](docs/screenshots/slide-1.png)
+
+### Espace de travail
+`File → Save workspace` / **QuickSave** (`Ctrl+S`) : sauvegarde des sources,
+fonctions et réglages de tous les graphes dans un fichier `.ctw` (JSON),
+rechargeable par `File → Open workspace`, glisser-déposer ou en argument de
+ligne de commande (`CurveTracer mon_projet.ctw`).
+
+### Polices
+Les polices Arial, Calibri, Segoe UI, Times New Roman, Courier New, Consolas,
+DejaVu… sont proposées si elles sont installées ; `File → Load a font file`
+ajoute n'importe quel `.ttf` / `.otf`. Elles sont utilisées à l'écran **et** dans
+les exports.
+
+## Installation
+
+### Binaire prêt à l'emploi
+Chaque push sur `main` déclenche GitHub Actions (onglet **Actions**) qui compile
+l'application : télécharger l'artefact `CurveTracer-windows-x64` (ou Linux) du
+dernier build réussi, décompresser et lancer `CurveTracer.exe`.
+Pousser un tag `v*` (ex. `v0.1.0`) crée une *release* avec les archives
+Windows / Linux / macOS.
+
+### Compilation depuis les sources
+Prérequis : [Rust](https://rustup.rs) ≥ 1.95.
+
+```bash
+git clone https://github.com/Citroz31/CurveTracer
+cd CurveTracer
+cargo run --release
+```
+
+Sous Linux, quelques bibliothèques système peuvent être nécessaires :
+`sudo apt install libxkbcommon-dev libwayland-dev`.
+
+Un fichier d'exemple est fourni : `sample_data/CGY2272_S-Parameters_example.csv`
+(données synthétiques, même structure qu'un fichier de S-paramètres : métadonnées
+puis en-tête en ligne 5, 7 SN × 3 températures × 2 tensions VDD).
+
+## Organisation du code
+
+| Dossier | Rôle |
+|---|---|
+| `src/data/` | chargement CSV (parallèle) / Excel, table en colonnes encodées en dictionnaire, moteur de formules |
+| `src/plot/config.rs` | description d'un graphe (sérialisée dans les espaces de travail) |
+| `src/plot/compute.rs` | filtres → séries → agrégations → segments de courbes |
+| `src/plot/view.rs` | graphe interactif (egui_plot), légende déplaçable, curseurs |
+| `src/plot/render.rs` | rendu PNG haute résolution (tiny-skia + ab_glyph) pour les exports |
+| `src/plot/geom.rs` | géométrie partagée : placement de la légende, décimation, graduations |
+| `src/export/` | écriture PowerPoint (`.pptx`) et ZIP |
+| `src/ui/` | pages de l'interface |
+
+Tests : `cargo test`.
