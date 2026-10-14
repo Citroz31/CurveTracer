@@ -87,7 +87,8 @@ jobs:
 
   release:
     name: GitHub release
-    if: startsWith(github.ref, 'refs/tags/')
+    # on a pushed tag v*, or on a manual run (the tag v<Cargo version> is then created)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: [build, build-macos]
     runs-on: ubuntu-latest
     permissions:
@@ -102,9 +103,19 @@ jobs:
           cp artifacts/CurveTracer-windows-x64/CurveTracer.exe artifacts/CurveTracer.exe
           cp docs/CurveTracer_Guide_utilisateur.pdf artifacts/
           cd artifacts && for d in */; do zip -qr "${d%/}.zip" "$d"; done
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+          fi
       - uses: softprops/action-gh-release@v2
         with:
-          name: CurveTracer ${{ github.ref_name }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: CurveTracer ${{ steps.version.outputs.tag }}
           body_path: docs/RELEASE_NOTES.md
           files: |
             artifacts/CurveTracer.exe
