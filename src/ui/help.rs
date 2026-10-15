@@ -29,6 +29,7 @@ pub fn show(ui: &mut Ui) {
             ui.label("    Series: one curve per value of a column (SN, temperature, part number…). Several series columns combine.");
             ui.label("• Drag a column onto a box, or use the X / Y / F / S buttons.");
             ui.label("• Process Data: mean, median, min, max, sum, RMS, standard deviation… of the curves, per X value.");
+            ui.label("• Smoothing (Process Data): moving average, Gaussian, Savitzky–Golay, median, exponential or X-width average, with adjustable window / order / passes.");
             ui.label("• View Data: table of the rows used by the plot.");
         });
         section(ui, "3. Explore", |ui| {

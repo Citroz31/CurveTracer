@@ -121,7 +121,10 @@ impl PlotState {
             self.view_key = vk;
             self.reset_view = true;
         }
-        if key == self.data_key || self.pending.as_ref().is_some_and(|(k, _)| *k == key) {
+        if key == self.data_key || self.pending.is_some() {
+            // one computation at a time: when settings change quickly (clicking
+            // filter values, dragging a range), the next one starts with the
+            // latest settings once the running one is done
             return;
         }
         let (tx, rx) = channel();
@@ -210,6 +213,20 @@ impl PlotState {
     pub fn open_editor(&mut self, target: EditTarget, pos: Pos2) {
         self.edit = Some(target);
         self.edit_pos = pos;
+    }
+
+    /// Data up to date with `cfg` (for the exports): waits for the running
+    /// computation and computes again if the settings changed meanwhile.
+    pub fn wait_current(&mut self, cfg: &PlotConfig, ds: Option<&Arc<Dataset>>) {
+        self.wait();
+        if let Some(ds) = ds {
+            let key = cfg.data_key() ^ ds.generation.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            if key != self.data_key {
+                self.data = Some(Arc::new(compute(ds, cfg)));
+                self.data_key = key;
+                self.reset_view = true;
+            }
+        }
     }
 
     /// Blocks until the pending computation (if any) is done.
@@ -318,6 +335,9 @@ fn step_spacer(step: f64, categorical: bool) -> impl Fn(GridInput) -> Vec<GridMa
 
 /// Points, color, width and dash pattern of a curve drawn with a custom pattern.
 type CustomPath = (Vec<[f64; 2]>, Color32, f32, Vec<f32>);
+
+/// Point budget of a thumbnail (plot list, Export page).
+const THUMB_POINTS: usize = 40_000;
 
 /// Minimum grid spacing given to egui_plot (its `base_step_size` = this many pixels).
 const GRID_MIN_PX: f32 = 8.0;
@@ -581,6 +601,20 @@ pub fn show_plot(
     let traces_data = Arc::clone(&data);
     let styles_c = styles.clone();
     let decimate = opts.decimate;
+    // thumbnails (200 px wide) do not need every point: keep one point out of
+    // `stride` when the plot is big (thousands of curves, millions of points)
+    let stride = if interactive {
+        1
+    } else {
+        let total: usize = data
+            .traces
+            .iter()
+            .zip(&styles)
+            .filter(|(_, s)| s.visible)
+            .map(|(t, _)| t.n_points)
+            .sum();
+        total.div_ceil(THUMB_POINTS).max(1)
+    };
     let resp = ui
         .scope_builder(UiBuilder::new().max_rect(plot_rect), |ui| {
             ui.visuals_mut().extreme_bg_color = bg;
@@ -612,6 +646,17 @@ pub fn show_plot(
                         } else {
                             buf.clear();
                             buf.extend_from_slice(seg);
+                        }
+                        if stride > 1 && buf.len() > 2 {
+                            let last = buf[buf.len() - 1];
+                            let mut k = 0;
+                            buf.retain(|_| {
+                                k += 1;
+                                (k - 1) % stride == 0
+                            });
+                            if buf.last() != Some(&last) {
+                                buf.push(last);
+                            }
                         }
                         if buf.is_empty() {
                             continue;

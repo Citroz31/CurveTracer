@@ -980,8 +980,13 @@ impl App {
 
     /// Plots selected for export, with their computed data.
     fn export_items(&mut self) -> Vec<ExportItem> {
+        let sources = &self.sources;
         for p in &mut self.plots {
-            p.state.wait();
+            let ds = sources
+                .iter()
+                .find(|s| s.key == p.cfg.source)
+                .and_then(|s| s.ds.as_ref());
+            p.state.wait_current(&p.cfg, ds);
         }
         let mut items = Vec::new();
         for p in self.plots.iter().filter(|p| p.cfg.export) {
@@ -1137,10 +1142,15 @@ impl App {
 
     /// Saves the traces of one plot as CSV.
     pub fn save_plot_csv_dialog(&mut self, i: usize) {
+        let ds = self
+            .plots
+            .get(i)
+            .and_then(|p| self.sources.iter().find(|s| s.key == p.cfg.source))
+            .and_then(|s| s.ds.clone());
         let Some(p) = self.plots.get_mut(i) else {
             return;
         };
-        p.state.wait();
+        p.state.wait_current(&p.cfg, ds.as_ref());
         let Some(data) = p.state.data.clone() else {
             return;
         };
@@ -1163,10 +1173,15 @@ impl App {
 
     /// Saves one plot as a PNG or SVG image.
     pub fn save_plot_image_dialog(&mut self, i: usize, fmt: ImageFormat) {
+        let ds = self
+            .plots
+            .get(i)
+            .and_then(|p| self.sources.iter().find(|s| s.key == p.cfg.source))
+            .and_then(|s| s.ds.clone());
         let Some(p) = self.plots.get_mut(i) else {
             return;
         };
-        p.state.wait();
+        p.state.wait_current(&p.cfg, ds.as_ref());
         let Some(data) = p.state.data.clone() else {
             return;
         };

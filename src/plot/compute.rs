@@ -265,11 +265,16 @@ pub fn compute(ds: &Dataset, cfg: &PlotConfig) -> PlotData {
         match f.mode {
             FilterMode::Values => {
                 if let Some(dict) = col.dict() {
+                    // one hash lookup per selected value (thousands of states)
+                    let index: FxHashMap<&str, usize> = dict.iter().enumerate().map(|(i, d)| (d.as_str(), i)).collect();
                     let mut allowed = vec![false; dict.len()];
                     for v in &f.values {
-                        if let Some(c) = dict.iter().position(|d| d == v) {
+                        if let Some(&c) = index.get(v.as_str()) {
                             allowed[c] = true;
                         }
+                    }
+                    if allowed.iter().all(|&a| a) {
+                        continue; // every value selected: no filtering
                     }
                     preds.push(Pred::Codes(col, allowed));
                 } else {
@@ -437,6 +442,8 @@ pub fn compute(ds: &Dataset, cfg: &PlotConfig) -> PlotData {
             // group traces by (y column, remaining series values)
             // (y column, remaining series values, member traces)
             let mut groups: Vec<AggGroup> = Vec::new();
+            let mut index: std::collections::HashMap<(String, Vec<(String, String)>), usize> =
+                std::collections::HashMap::new();
             for (i, t) in traces.iter().enumerate() {
                 let remaining: Vec<(String, String)> = t
                     .series
@@ -444,9 +451,12 @@ pub fn compute(ds: &Dataset, cfg: &PlotConfig) -> PlotData {
                     .filter(|(c, _)| !collapse.contains(&c))
                     .cloned()
                     .collect();
-                match groups.iter_mut().find(|(y, r, _)| *y == t.y_col && *r == remaining) {
-                    Some(g) => g.2.push(i),
-                    None => groups.push((t.y_col.clone(), remaining, vec![i])),
+                match index.get(&(t.y_col.clone(), remaining.clone())) {
+                    Some(&g) => groups[g].2.push(i),
+                    None => {
+                        index.insert((t.y_col.clone(), remaining.clone()), groups.len());
+                        groups.push((t.y_col.clone(), remaining, vec![i]));
+                    }
                 }
             }
             let collapsed_names = collapse.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
@@ -481,6 +491,40 @@ pub fn compute(ds: &Dataset, cfg: &PlotConfig) -> PlotData {
             } else {
                 traces = agg_traces;
             }
+        }
+    }
+
+    // ---- smoothing ------------------------------------------------------------
+    let sm = &cfg.process.smooth;
+    if sm.enabled && !traces.is_empty() {
+        let desc = sm.describe();
+        let smoothed: Vec<Trace> = traces
+            .iter()
+            .filter(|t| !(has_both && !t.aggregate))
+            .map(|t| Trace {
+                key: format!("smooth:{}", t.key),
+                label: if sm.keep_original {
+                    format!("{} ({desc})", t.label)
+                } else {
+                    t.label.clone()
+                },
+                y_col: t.y_col.clone(),
+                series: t.series.clone(),
+                segments: t.segments.iter().map(|s| sm.apply(s)).collect(),
+                sorted: t.sorted,
+                n_points: t.n_points,
+                aggregate: true,
+            })
+            .collect();
+        if sm.keep_original {
+            // the raw curves stay, faded; the smoothed ones are drawn on top
+            for t in &mut traces {
+                t.aggregate = false;
+            }
+            has_both = true;
+            traces.extend(smoothed);
+        } else {
+            traces = smoothed;
         }
     }
 
@@ -629,6 +673,36 @@ mod tests {
     }
 
     #[test]
+    fn smoothing_and_all_values_filter() {
+        let ds = sample();
+        let mut c = cfg();
+        c.series = vec!["SN".into()];
+        c.options.sort_x = true;
+        c.filters = vec![FilterConfig {
+            column: "Temp".into(),
+            values: vec!["25".into(), "-40".into()],
+            ..Default::default()
+        }];
+        let plain = compute(&ds, &c);
+        c.process.smooth.enabled = true;
+        c.process.smooth.method = crate::plot::smooth::SmoothMethod::MovingAverage;
+        c.process.smooth.window = 3;
+        let d = compute(&ds, &c);
+        // raw curves kept (faded) + smoothed curves
+        assert_eq!(d.traces.len(), 2 * plain.traces.len());
+        assert!(d.has_aggregates_and_originals);
+        let sm = d.traces.iter().find(|t| t.key.starts_with("smooth:")).unwrap();
+        assert!(sm.label.contains("avg 3 pts"));
+        assert_eq!(sm.n_points, plain.traces[0].n_points);
+        c.process.smooth.keep_original = false;
+        let d = compute(&ds, &c);
+        assert_eq!(d.traces.len(), plain.traces.len());
+        // every value of the filter selected = same rows as no filter
+        c.filters.clear();
+        assert_eq!(compute(&ds, &c).rows.len(), d.rows.len());
+    }
+
+    #[test]
     fn aggregation() {
         let ds = sample();
         let mut c = cfg();
@@ -638,6 +712,7 @@ mod tests {
             func: AggFunc::Mean,
             collapse: vec!["SN".into()],
             keep_original: false,
+            ..Default::default()
         };
         let d = compute(&ds, &c);
         assert_eq!(d.traces.len(), 2);

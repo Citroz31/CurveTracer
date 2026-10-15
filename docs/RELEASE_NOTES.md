@@ -10,6 +10,16 @@
 > Au premier lancement, Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » (exécutable non signé) :
 > **Informations complémentaires → Exécuter quand même**.
 
+## Nouveautés de la version 0.3.2
+
+- **Lissage des courbes** (Data → Process Data → *Smoothing*) : moyenne glissante, gaussien, **Savitzky–Golay**, médiane (anti-pics), exponentiel sans déphasage, moyenne sur une largeur en X ;
+  fenêtre / σ / ordre / nombre de passes réglables, préréglages, courbes brutes conservées en clair.
+- **Correctif** : le panneau de réglages ne s'élargit plus tout seul (sa largeur ne dépend plus que de sa bordure ; un contenu trop large défile).
+- **Filtres sur des milliers de valeurs** (ex. 4096 états d'un corechip) : liste virtualisée, recherche avec *Select / Unselect matches*,
+  calcul du filtre en temps linéaire, clé de calcul sans formatage du texte, un seul calcul à la fois par graphe (plus d'empilement de calculs en cliquant vite).
+  Coût d'affichage avec le filtre ouvert : ~42 ms → ~17 ms par image sur un fichier de 150 Mo.
+- Miniatures allégées pour les très gros graphes ; regroupement des agrégations en temps linéaire.
+
 ## Nouveautés de la version 0.3.1 — chargement des gros fichiers
 
 - **Chargement CSV jusqu'à 14× plus rapide** sur les vrais fichiers de mesure (1 M lignes, 277 Mo : 13 s → < 1 s) :

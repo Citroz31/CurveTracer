@@ -13,6 +13,7 @@ use crate::plot::config::{
     AggFunc, AxisLayout, FilterConfig, FilterMode, LegendPos, LineKind, MarkerKind, Modifier, Palette, PlotConfig,
     Scale, TraceOverride,
 };
+use crate::plot::smooth::{SmoothConfig, SmoothMethod};
 use crate::plot::style::trace_styles;
 
 /// Drag & drop payload: a column name.
@@ -44,7 +45,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 }
 
 fn scrolled(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
-    egui::ScrollArea::vertical()
+    // horizontal scrolling too: a wide table (Trace Options) scrolls instead of
+    // being cut
+    egui::ScrollArea::both()
         .id_salt(("settings_scroll", id))
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -515,36 +518,60 @@ fn filter_editor(ui: &mut Ui, k: usize, f: &mut FilterConfig, col: &Column, sear
                 }
             });
             let s = search.to_lowercase();
-            let mut selected: HashSet<String> = f.values.iter().cloned().collect();
+            // codes shown (search applied), in natural order
+            let visible: Vec<u32> = if s.is_empty() {
+                sorted.to_vec()
+            } else {
+                sorted
+                    .iter()
+                    .copied()
+                    .filter(|&c| dict[c as usize].to_lowercase().contains(&s))
+                    .collect()
+            };
+            let mut selected: HashSet<&str> = f.values.iter().map(String::as_str).collect();
             let mut changed = false;
             let mut only: Option<String> = None;
+            let row_h = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+            // only the visible rows are built (thousands of states stay fluid)
             egui::ScrollArea::vertical()
                 .id_salt(("filter_values", k))
-                .max_height(190.0)
+                .max_height(220.0)
                 .auto_shrink([false, true])
-                .show(ui, |ui| {
-                    for &c in sorted {
-                        let v = &dict[c as usize];
-                        if !s.is_empty() && !v.to_lowercase().contains(&s) {
-                            continue;
-                        }
-                        let label = if v.is_empty() { "(empty)".to_owned() } else { v.clone() };
+                .show_rows(ui, row_h - ui.spacing().item_spacing.y, visible.len(), |ui, range| {
+                    for &c in &visible[range] {
+                        let v = dict[c as usize].as_str();
+                        let label = if v.is_empty() { "(empty)" } else { v };
                         ui.horizontal(|ui| {
                             let mut on = selected.contains(v);
                             if ui.checkbox(&mut on, label).changed() {
                                 changed = true;
                                 if on {
-                                    selected.insert(v.clone());
+                                    selected.insert(v);
                                 } else {
                                     selected.remove(v);
                                 }
                             }
                             if ui.small_button("only").on_hover_text("Keep only this value").clicked() {
-                                only = Some(v.clone());
+                                only = Some(v.to_owned());
                             }
                         });
                     }
                 });
+            if !s.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("{} match(es)", visible.len())).weak().small());
+                    if ui.small_button("Select matches").clicked() {
+                        selected.extend(visible.iter().map(|&c| dict[c as usize].as_str()));
+                        changed = true;
+                    }
+                    if ui.small_button("Unselect matches").clicked() {
+                        for &c in &visible {
+                            selected.remove(dict[c as usize].as_str());
+                        }
+                        changed = true;
+                    }
+                });
+            }
             if let Some(v) = only {
                 f.values = vec![v];
             } else if changed {
@@ -552,7 +579,7 @@ fn filter_editor(ui: &mut Ui, k: usize, f: &mut FilterConfig, col: &Column, sear
                 f.values = sorted
                     .iter()
                     .map(|&c| &dict[c as usize])
-                    .filter(|v| selected.contains(*v))
+                    .filter(|v| selected.contains(v.as_str()))
                     .cloned()
                     .collect();
             }
@@ -590,6 +617,102 @@ fn filter_editor(ui: &mut Ui, k: usize, f: &mut FilterConfig, col: &Column, sear
             }
         }
     }
+}
+
+fn smoothing_section(ui: &mut Ui, sm: &mut SmoothConfig) {
+    section(ui, "Smoothing", |ui| {
+        ui.checkbox(&mut sm.enabled, RichText::new("Smooth the curves").strong())
+            .on_hover_text("Applied to every curve of this plot (after the processing above, if any)");
+        ui.add_enabled_ui(sm.enabled, |ui| {
+            egui::Grid::new("smooth_grid")
+                .num_columns(2)
+                .spacing([10.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Method");
+                    egui::ComboBox::from_id_salt("smooth_method")
+                        .selected_text(sm.method.label())
+                        .width(210.0)
+                        .show_ui(ui, |ui| {
+                            for m in SmoothMethod::ALL {
+                                ui.selectable_value(&mut sm.method, m, m.label())
+                                    .on_hover_text(m.help());
+                            }
+                        });
+                    ui.end_row();
+
+                    match sm.method {
+                        SmoothMethod::Gaussian => {
+                            ui.label("σ (points)")
+                                .on_hover_text("Standard deviation of the bell, in points: bigger = smoother");
+                            ui.add(
+                                egui::Slider::new(&mut sm.sigma, 0.5..=50.0)
+                                    .logarithmic(true)
+                                    .max_decimals(1),
+                            );
+                            ui.end_row();
+                        }
+                        SmoothMethod::XWindow => {
+                            ui.label("Width (X units)")
+                                .on_hover_text("Points closer than ± width / 2 are averaged (e.g. 0.5 = ±0.25 GHz)");
+                            let speed = (sm.x_width.abs() * 0.01).max(1e-9);
+                            ui.add(
+                                egui::DragValue::new(&mut sm.x_width)
+                                    .range(1e-12..=1e15)
+                                    .speed(speed)
+                                    .max_decimals(6),
+                            );
+                            ui.end_row();
+                        }
+                        _ => {
+                            let label = if sm.method == SmoothMethod::Exponential {
+                                "Span (points)"
+                            } else {
+                                "Window (points)"
+                            };
+                            ui.label(label)
+                                .on_hover_text("Number of points used for each value: bigger = smoother");
+                            let mut w = sm.window as u32;
+                            if ui
+                                .add(egui::Slider::new(&mut w, 3..=301).logarithmic(true).step_by(2.0))
+                                .changed()
+                            {
+                                sm.window = (w as usize) | 1;
+                            }
+                            ui.end_row();
+                        }
+                    }
+                    if sm.method == SmoothMethod::SavitzkyGolay {
+                        ui.label("Polynomial order")
+                            .on_hover_text("2 or 3 for most curves; higher keeps sharper details but smooths less");
+                        let max = sm.window.saturating_sub(1).clamp(1, 6);
+                        ui.add(egui::Slider::new(&mut sm.order, 1..=max));
+                        ui.end_row();
+                    }
+                    ui.label("Passes")
+                        .on_hover_text("Apply the smoothing several times (smoother)");
+                    ui.add(egui::Slider::new(&mut sm.passes, 1..=5));
+                    ui.end_row();
+                });
+            ui.label(RichText::new(sm.method.help()).weak().small());
+            ui.checkbox(&mut sm.keep_original, "Keep the raw curves (shown lighter)");
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Presets:").weak());
+                for (name, m, w, o) in [
+                    ("Light", SmoothMethod::SavitzkyGolay, 7, 2),
+                    ("Medium", SmoothMethod::SavitzkyGolay, 15, 2),
+                    ("Strong", SmoothMethod::SavitzkyGolay, 41, 3),
+                    ("Remove spikes", SmoothMethod::Median, 5, 2),
+                ] {
+                    if ui.small_button(name).clicked() {
+                        sm.method = m;
+                        sm.window = w;
+                        sm.order = o;
+                        sm.passes = 1;
+                    }
+                }
+            });
+        });
+    });
 }
 
 fn process_data(app: &mut App, ui: &mut Ui) {
@@ -648,6 +771,7 @@ fn process_data(app: &mut App, ui: &mut Ui) {
             }
         });
     });
+    smoothing_section(ui, &mut cfg.process.smooth);
     section(ui, "Functions", |ui| {
         ui.label("Mean, median, min, max, sum, RMS (√mean(y²)), standard deviation, range (max − min), count.");
         ui.label(

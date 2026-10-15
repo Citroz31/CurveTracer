@@ -75,6 +75,9 @@ Onglet **Data**
   étendue, comptage — par X, en regroupant les séries choisies
   (ex. moyenne sur les SN → une courbe par température), avec ou sans les courbes
   d'origine.
+- **Smoothing** : lissage des courbes — moyenne glissante, gaussien,
+  Savitzky–Golay, médiane, exponentiel sans déphasage, moyenne sur une largeur
+  en X — avec fenêtre, ordre et nombre de passes réglables.
 - **View Data** : table (virtualisée) des lignes utilisées par le graphe.
 
 Onglet **Layout** : titre (affiché ou non), libellés X / Y, police / taille / couleur

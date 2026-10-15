@@ -1,6 +1,6 @@
 ---
 title: "CurveTracer — Guide utilisateur"
-subtitle: "Version 0.3.1"
+subtitle: "Version 0.3.2"
 ---
 
 # 1. Présentation
@@ -273,6 +273,33 @@ moyenne (*Mean*), médiane, min, max, somme, **RMS**, écart-type, étendue
   moyenne par température ;
 - **Keep the original curves** : affiche aussi les courbes d'origine, en plus
   clair, sous les courbes calculées (en trait épais).
+
+### Lissage (*Smoothing*)
+
+![Lissage Savitzky–Golay, courbes brutes conservées en clair](screenshots/smoothing.png)
+
+Cocher **Smooth the curves** pour lisser toutes les courbes du graphe (après le
+traitement ci-dessus s'il est activé). Méthodes (*Method*) :
+
+| Méthode | Principe | Réglage |
+|---|---|---|
+| **Moving average** | moyenne des N points voisins ; simple, aplatit les pics | *Window* (points) |
+| **Gaussian** | moyenne pondérée en cloche, plus douce que la moyenne glissante | *σ* (points) |
+| **Savitzky–Golay** | ajuste un polynôme sur N points autour de chaque point : retire le bruit en gardant hauteur et largeur des pics, pentes et ondulations (idéal pour les S-paramètres) | *Window* + *Polynomial order* (2–3 conseillé) |
+| **Median** | médiane des N voisins : supprime les pics isolés / glitches, garde les marches | *Window* (points) |
+| **Exponential (zero-phase)** | moyenne exponentielle aller puis retour (pas de décalage de la courbe) | *Span* (points) |
+| **Moving average (X width)** | moyenne des points à ± largeur / 2 sur l'axe X, pour un pas en X irrégulier | *Width* (unités de X, ex. 0.5 GHz) |
+
+- **Passes** : applique le lissage plusieurs fois (plus lisse).
+- **Keep the raw curves** : garde les courbes brutes en clair sous les courbes
+  lissées (en trait épais), dont la légende indique la méthode
+  (`SG 41 pts, ord 3`).
+- **Presets** : *Light*, *Medium*, *Strong* (Savitzky–Golay 7 / 15 / 41
+  points) et *Remove spikes* (médiane sur 5 points).
+
+Aux extrémités, la fenêtre se réduit symétriquement (Savitzky–Golay utilise le
+polynôme de la première / dernière fenêtre) : les bords ne sont pas décalés.
+Les courbes lissées sont exportées (PowerPoint, images, CSV) comme les autres.
 
 ## 5.3 Onglet Data → View Data
 

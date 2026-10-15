@@ -280,6 +280,18 @@ fn preview_dropped_files(ctx: &egui::Context) {
 
 // ---- small reusable widgets ---------------------------------------------------
 
+/// Shows `add` in exactly the space left in `ui` (used inside the resizable
+/// side panels): the content can never widen the panel — egui panels take the
+/// width of their content, so a slightly too wide widget made the panel grow
+/// at every frame. What does not fit is clipped (or scrolls).
+pub fn fixed_area(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    let rect = ui.available_rect_before_wrap();
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(*ui.layout()));
+    child.set_clip_rect(rect.intersect(ui.clip_rect()));
+    add(&mut child);
+    ui.allocate_rect(rect, egui::Sense::hover());
+}
+
 /// A titled box.
 pub fn section<R>(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     Frame::group(ui.style())

@@ -232,6 +232,8 @@ pub struct ProcessConfig {
     pub collapse: Vec<String>,
     /// Keep the original traces next to the aggregated ones.
     pub keep_original: bool,
+    /// Smoothing of the curves (applied after the aggregation, if any).
+    pub smooth: super::smooth::SmoothConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -730,20 +732,36 @@ impl Default for PlotConfig {
 impl PlotConfig {
     /// Hash of everything that changes the computed traces.
     pub fn data_key(&self) -> u64 {
-        let s = format!(
-            "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}",
+        use std::hash::Hasher;
+        // called every frame for every plot: hash the (possibly thousands of)
+        // filter values directly instead of formatting the whole configuration
+        let mut h = crate::data::hash::FxHasher::default();
+        let small = format!(
+            "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}",
             self.source,
             self.x,
             self.x_scale,
             self.ys,
             self.y_scale,
-            self.filters,
             self.series,
             self.process,
             self.options.sort_x,
             self.options.break_on_reversal
         );
-        hash_one(&s)
+        h.write(small.as_bytes());
+        for f in &self.filters {
+            h.write(f.column.as_bytes());
+            h.write_u8(f.enabled as u8);
+            h.write_u8(f.mode as u8);
+            h.write_u64(f.min.map_or(u64::MAX, f64::to_bits));
+            h.write_u64(f.max.map_or(u64::MAX - 1, f64::to_bits));
+            h.write_usize(f.values.len());
+            for v in &f.values {
+                h.write(v.as_bytes());
+                h.write_u8(0xFF);
+            }
+        }
+        h.finish()
     }
 
     /// Hash of the axis ranges (a change resets the view).

@@ -56,7 +56,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         .resizable(true)
         .default_size(205.0)
         .size_range(150.0..=340.0)
-        .show(ui, |ui| strip(app, ui));
+        .show(ui, |ui| super::fixed_area(ui, |ui| strip(app, ui)));
     if app.plots.is_empty() {
         return;
     }
@@ -97,7 +97,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         .resizable(true)
         .default_size(440.0)
         .size_range(320.0..=900.0)
-        .show(ui, |ui| plot_settings::show(app, ui));
+        .show(ui, |ui| super::fixed_area(ui, |ui| plot_settings::show(app, ui)));
 
     egui::CentralPanel::default()
         .frame(egui::Frame::new().inner_margin(Margin::same(4)))
