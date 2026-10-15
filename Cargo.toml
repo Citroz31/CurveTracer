@@ -1,6 +1,6 @@
 [package]
 name = "curve_tracer"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 rust-version = "1.95"
 description = "CurveTracer – fast, interactive curve plotting from CSV / Excel measurement files"
@@ -9,6 +9,10 @@ publish = false
 [[bin]]
 name = "CurveTracer"
 path = "src/main.rs"
+
+[build-dependencies]
+# Windows icon, version information and manifest of the executable
+winresource = "0.1"
 
 [dependencies]
 # GUI

@@ -1,6 +1,6 @@
 ---
 title: "CurveTracer — Guide utilisateur"
-subtitle: "Version 0.3.3"
+subtitle: "Version 0.3.4"
 ---
 
 # 1. Présentation
@@ -62,8 +62,12 @@ erreurs…) et la mémoire utilisée.
 3. Lancer `CurveTracer.exe`. Aucune installation n'est nécessaire.
 
 > Windows peut afficher « Windows a protégé votre ordinateur » (SmartScreen)
-> car l'exécutable n'est pas signé : cliquer sur **Informations
-> complémentaires → Exécuter quand même**.
+> tant que l'exécutable n'est pas signé numériquement : cliquer sur
+> **Informations complémentaires → Exécuter quand même**. Pour ne plus voir
+> l'avertissement pour ce fichier : *clic droit sur `CurveTracer.exe` →
+> Propriétés → cocher « Débloquer » → OK* (ou `Unblock-File .\CurveTracer.exe`
+> dans PowerShell). La suppression définitive passe par une signature de code
+> (voir `docs/SIGNATURE_WINDOWS.md` sur GitHub).
 
 Raccourcis utiles : **Ctrl+O** ouvrir des fichiers, **Ctrl+S** enregistrer
 l'espace de travail.

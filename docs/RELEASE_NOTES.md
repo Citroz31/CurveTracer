@@ -7,8 +7,16 @@
 | CurveTracer-windows-x64.zip | exécutable + guide + fichier d'exemple |
 | CurveTracer-linux-x64.zip / CurveTracer-macos.zip | versions Linux et macOS |
 
-> Au premier lancement, Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » (exécutable non signé) :
-> **Informations complémentaires → Exécuter quand même**.
+> Au premier lancement, Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » tant que l'exécutable n'est pas signé :
+> **Informations complémentaires → Exécuter quand même**, ou une fois pour toutes *clic droit → Propriétés → Débloquer*.
+> Les étapes pour supprimer définitivement cet avertissement (signature de code) sont décrites dans `docs/SIGNATURE_WINDOWS.md`.
+> `SHA256SUMS.txt` donne l'empreinte de chaque fichier (vérification, liste blanche du service informatique).
+
+## Nouveautés de la version 0.3.4
+
+- Exécutable Windows avec **icône**, **informations de version et d'éditeur** (*Propriétés → Détails*) et manifeste standard (droits utilisateur, chemins longs) ; icône de la fenêtre.
+- **Signature de code prête** : la chaîne de compilation signe `CurveTracer.exe` (Azure Artifact Signing) dès que les identifiants sont configurés — voir `docs/SIGNATURE_WINDOWS.md`.
+- Empreintes SHA-256 publiées avec chaque version.
 
 ## Nouveautés de la version 0.3.3 — fiabilité
 

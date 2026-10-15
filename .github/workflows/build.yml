@@ -43,6 +43,10 @@ jobs:
             bin: CurveTracer
             artifact: CurveTracer-linux-x64
     runs-on: ${{ matrix.os }}
+    env:
+      # Code signing (Windows SmartScreen): enabled once the Azure Artifact
+      # Signing secrets are configured in the repository settings.
+      SIGNING_ENABLED: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.SIGNING_ENDPOINT != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -52,6 +56,25 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
       - name: Build (release)
         run: cargo build --release
+      - name: Sign the executable (Azure Artifact Signing)
+        if: runner.os == 'Windows' && env.SIGNING_ENABLED == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.SIGNING_CERTIFICATE_PROFILE }}
+          files: ${{ github.workspace }}\target\release\CurveTracer.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: CurveTracer
+      - name: Show the signature
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Get-AuthenticodeSignature target\release\CurveTracer.exe | Format-List Status, StatusMessage, SignerCertificate
       - name: Package
         shell: bash
         run: |
@@ -103,6 +126,7 @@ jobs:
           cp artifacts/CurveTracer-windows-x64/CurveTracer.exe artifacts/CurveTracer.exe
           cp docs/CurveTracer_Guide_utilisateur.pdf artifacts/
           cd artifacts && for d in */; do zip -qr "${d%/}.zip" "$d"; done
+          sha256sum CurveTracer.exe *.zip > SHA256SUMS.txt
       - name: Version
         id: version
         run: |
@@ -121,3 +145,4 @@ jobs:
             artifacts/CurveTracer.exe
             artifacts/CurveTracer_Guide_utilisateur.pdf
             artifacts/*.zip
+            artifacts/SHA256SUMS.txt

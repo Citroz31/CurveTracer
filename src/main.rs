@@ -14,7 +14,12 @@ fn main() -> eframe::Result {
             .with_title("CurveTracer")
             .with_inner_size([1500.0, 920.0])
             .with_min_inner_size([960.0, 600.0])
-            .with_drag_and_drop(true),
+            .with_drag_and_drop(true)
+            .with_icon(egui::IconData {
+                rgba: include_bytes!("../assets/icon64.rgba").to_vec(),
+                width: 64,
+                height: 64,
+            }),
         ..Default::default()
     };
     eframe::run_native(

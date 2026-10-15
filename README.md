@@ -150,7 +150,10 @@ les exports.
 ### Binaire prêt à l'emploi
 Télécharger **`CurveTracer.exe`** depuis la page
 [**Releases**](https://github.com/Citroz31/CurveTracer/releases/latest) et le lancer
-(aucune installation). Le **[guide utilisateur (PDF)](docs/CurveTracer_Guide_utilisateur.pdf)**
+(aucune installation). Avertissement SmartScreen au premier lancement :
+*Informations complémentaires → Exécuter quand même*, ou *clic droit → Propriétés →
+Débloquer* ; pour le supprimer définitivement (signature de code), voir
+[docs/SIGNATURE_WINDOWS.md](docs/SIGNATURE_WINDOWS.md). Le **[guide utilisateur (PDF)](docs/CurveTracer_Guide_utilisateur.pdf)**
 y est aussi joint ([version en ligne](docs/GUIDE_UTILISATEUR.md)).
 
 Chaque push sur `main` compile aussi l'application (onglet **Actions**, artefact
