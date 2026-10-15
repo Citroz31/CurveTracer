@@ -415,6 +415,33 @@ pub fn show_plot(
     fonts: &FontBook,
     interactive: bool,
 ) {
+    show_plot_impl(
+        ui,
+        area,
+        cfg,
+        st,
+        fonts,
+        interactive,
+        if interactive { 1.0 } else { 0.55 },
+    );
+}
+
+/// Miniature of a plot: `scale` = thumbnail width / width of the real plot, so
+/// that fonts, margins, legend and lines keep their proportions (`area`
+/// should have the proportions of the real plot area).
+pub fn show_thumbnail(ui: &mut Ui, area: Rect, cfg: &mut PlotConfig, st: &mut PlotState, fonts: &FontBook, scale: f32) {
+    show_plot_impl(ui, area, cfg, st, fonts, false, scale.clamp(0.12, 1.0));
+}
+
+fn show_plot_impl(
+    ui: &mut Ui,
+    area: Rect,
+    cfg: &mut PlotConfig,
+    st: &mut PlotState,
+    fonts: &FontBook,
+    interactive: bool,
+    thumb: f32,
+) {
     let lay = cfg.layout.clone();
     let bg = c32(lay.background);
     let painter = ui.painter_at(area);
@@ -439,7 +466,12 @@ pub fn show_plot(
         );
         return;
     }
-    let thumb = if interactive { 1.0 } else { 0.55 };
+    // line widths of the miniatures shrink less than the text (stay visible)
+    let wscale = if interactive {
+        1.0
+    } else {
+        thumb.sqrt().clamp(0.45, 1.0)
+    };
     let mut fig = area.shrink(6.0 * thumb);
 
     // ---- title --------------------------------------------------------------
@@ -547,6 +579,7 @@ pub fn show_plot(
     let y_dec = (!lay.y.auto_decimals).then_some(lay.y.decimals);
     let tick_color = c32(lay.tick_font.color);
     let mut x_axis = AxisHints::new_x()
+        .min_thickness(14.0 * thumb)
         .label(
             RichText::new(x_label)
                 .font(label_font.clone())
@@ -556,6 +589,7 @@ pub fn show_plot(
         .tick_label_color(tick_color)
         .formatter(tick_formatter(x_step, x_dec, cats.clone()));
     let mut y_axis = AxisHints::new_y()
+        .min_thickness(14.0 * thumb)
         .label(RichText::new(y_label).font(label_font).color(c32(lay.label_font.color)))
         .tick_label_font(tick_font)
         .tick_label_color(tick_color)
@@ -716,13 +750,13 @@ pub fn show_plot(
                                     .color(Color32::from_black_alpha(1))
                                     .width(0.0),
                             );
-                            custom.push((take(&mut buf, !markers), color, s.width, s.dash.clone()));
+                            custom.push((take(&mut buf, !markers), color, s.width * wscale, s.dash.clone()));
                         } else if s.line != LineKind::None {
                             pu.line(
                                 Line::new(s.label.clone(), PlotPoints::new(take(&mut buf, !markers)))
                                     .id(Id::new(("ct_line", ti, si)))
                                     .color(color)
-                                    .width(s.width)
+                                    .width(s.width * wscale)
                                     .style(line_style(s.line, s.width)),
                             );
                         }
@@ -732,7 +766,7 @@ pub fn show_plot(
                                     .id(Id::new(("ct_pts", ti, si)))
                                     .color(color)
                                     .shape(marker_shape(s.marker))
-                                    .radius(s.marker_size)
+                                    .radius(s.marker_size * wscale)
                                     .filled(true),
                             );
                         }

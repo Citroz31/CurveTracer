@@ -8,7 +8,7 @@ use super::{NAVY, section};
 use crate::app::App;
 use crate::export::pptx::SlideFormat;
 use crate::plot::render::ImageFormat;
-use crate::plot::view::show_plot;
+use crate::plot::view::show_thumbnail;
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     ui.horizontal(|ui| {
@@ -49,7 +49,13 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     let thumbs_h = (ui.available_height() - 150.0).max(220.0);
     let cols = ((avail / 330.0).floor() as usize).clamp(1, 6);
     let w = (avail - 12.0 * cols as f32) / cols as f32;
-    let h = w * 0.62;
+    // miniatures of the exported images: same proportions and same relative
+    // text / line sizes as the PNG / SVG / slide images
+    let ew = app.export.width.max(1) as f32;
+    let eh = app.export.height.max(1) as f32;
+    let h = (w * eh / ew).clamp(w * 0.3, w * 1.5);
+    let export_scale = crate::plot::render::RenderOptions::new(app.export.width, app.export.height).scale;
+    let thumb_scale = w / (ew / export_scale);
     let mut remove: Option<usize> = None;
     let mut open: Option<usize> = None;
     egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -64,7 +70,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                             ui.set_width(w);
                             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
                             let p = &mut app.plots[i];
-                            show_plot(ui, rect, &mut p.cfg, &mut p.state, &fonts, false);
+                            show_thumbnail(ui, rect, &mut p.cfg, &mut p.state, &fonts, thumb_scale);
                             // on top of the (non interactive) plot
                             let resp = ui.interact(rect, ui.id().with(("thumb", i)), Sense::click());
                             let painter = ui.painter();

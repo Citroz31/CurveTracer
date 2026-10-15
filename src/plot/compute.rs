@@ -503,19 +503,23 @@ pub fn compute(ds: &Dataset, cfg: &PlotConfig) -> PlotData {
         let smoothed: Vec<Trace> = traces
             .iter()
             .filter(|t| !(has_both && !t.aggregate))
-            .map(|t| Trace {
-                key: format!("smooth:{}", t.key),
-                label: if sm.keep_original {
-                    format!("{} ({desc})", t.label)
-                } else {
-                    t.label.clone()
-                },
-                y_col: t.y_col.clone(),
-                series: t.series.clone(),
-                segments: t.segments.iter().map(|s| sm.apply(s)).collect(),
-                sorted: t.sorted,
-                n_points: t.n_points,
-                aggregate: true,
+            .map(|t| {
+                let segments: Vec<Vec<[f64; 2]>> = t.segments.iter().map(|s| sm.apply(s)).collect();
+                let sorted = segments.iter().all(|s| s.windows(2).all(|w| w[0][0] <= w[1][0]));
+                Trace {
+                    key: format!("smooth:{}", t.key),
+                    label: if sm.keep_original {
+                        format!("{} ({desc})", t.label)
+                    } else {
+                        t.label.clone()
+                    },
+                    y_col: t.y_col.clone(),
+                    series: t.series.clone(),
+                    n_points: segments.iter().map(Vec::len).sum(),
+                    segments,
+                    sorted,
+                    aggregate: true,
+                }
             })
             .collect();
         if sm.keep_original {
@@ -696,7 +700,8 @@ mod tests {
         assert!(d.has_aggregates_and_originals);
         let sm = d.traces.iter().find(|t| t.key.starts_with("smooth:")).unwrap();
         assert!(sm.label.contains("avg 3 pts"));
-        assert_eq!(sm.n_points, plain.traces[0].n_points);
+        // few points: drawn as a dense smooth curve
+        assert!(sm.n_points >= plain.traces[0].n_points);
         c.process.smooth.keep_original = false;
         let d = compute(&ds, &c);
         assert_eq!(d.traces.len(), plain.traces.len());

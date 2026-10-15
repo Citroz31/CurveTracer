@@ -194,6 +194,22 @@ pub enum TaskMsg {
     Failed(String),
 }
 
+/// An undoable change of the plots.
+#[derive(Clone, Debug)]
+pub enum UndoAction {
+    /// The markers of a plot before the change.
+    Markers {
+        id: u64,
+        markers: Vec<crate::plot::config::DataMarker>,
+    },
+    /// A plot was deleted from this position.
+    Removed { index: usize, cfg: Box<PlotConfig> },
+    /// A plot was added (new, duplicated).
+    Added { id: u64 },
+    /// A plot was moved from → to.
+    Moved { from: usize, to: usize },
+}
+
 /// Change of workspace waiting for the "save the changes?" answer.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Switch {
@@ -278,6 +294,11 @@ pub struct App {
     mem_cache: std::cell::Cell<(u64, usize)>,
     /// Plots page: left-drag draws a zoom rectangle instead of panning.
     pub box_zoom: bool,
+    /// Ctrl+Z / Ctrl+Y on the plots (markers, deleted / added / moved plots).
+    undo: Vec<UndoAction>,
+    redo: Vec<UndoAction>,
+    /// Size of the plot area of the Plots page (thumbnails use its proportions).
+    pub plot_area: egui::Vec2,
     /// (time, result) of the last change detection (it serializes the workspace).
     dirty_check: std::cell::Cell<(f64, bool)>,
     pub import_defaults: ImportOptions,
@@ -348,6 +369,9 @@ impl App {
             quitting: false,
             mem_cache: std::cell::Cell::new((u64::MAX, 0)),
             box_zoom: false,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            plot_area: egui::vec2(700.0, 700.0),
             dirty_check: std::cell::Cell::new((f64::NEG_INFINITY, false)),
             import_defaults: ImportOptions::default(),
             data_page: DataPageState::default(),
@@ -789,6 +813,7 @@ impl App {
             ui: PlotUiState::default(),
         });
         self.active = self.plots.len() - 1;
+        self.push_undo(UndoAction::Added { id });
         self.page = Page::Plots;
         self.settings_tab = SettingsTab::Data;
         self.data_tab = DataTab::Select;
@@ -802,6 +827,7 @@ impl App {
         let mut cfg = p.cfg.clone();
         cfg.id = self.new_id();
         cfg.name = format!("{} (copy)", cfg.name);
+        let id = cfg.id;
         self.plots.insert(
             i + 1,
             PlotEntry {
@@ -811,33 +837,138 @@ impl App {
             },
         );
         self.active = i + 1;
+        self.push_undo(UndoAction::Added { id });
     }
 
     /// Moves a plot one place up (`-1`) or down (`+1`).
     pub fn move_plot(&mut self, i: usize, dir: isize) {
         let j = i as isize + dir;
-        if j < 0 || j as usize >= self.plots.len() || i >= self.plots.len() {
-            return;
-        }
-        self.plots.swap(i, j as usize);
-        if self.active == i {
-            self.active = j as usize;
-        } else if self.active == j as usize {
-            self.active = i;
+        if j >= 0 {
+            self.move_plot_to(i, j as usize);
         }
     }
 
+    /// Moves the plot at `from` so that it ends at position `to` (drag & drop).
+    pub fn move_plot_to(&mut self, from: usize, to: usize) {
+        if self.move_plot_raw(from, to) {
+            self.push_undo(UndoAction::Moved { from, to });
+        }
+    }
+
+    fn move_plot_raw(&mut self, from: usize, to: usize) -> bool {
+        let n = self.plots.len();
+        if from >= n || to >= n || from == to {
+            return false;
+        }
+        let active_id = self.plots.get(self.active).map(|p| p.cfg.id);
+        let p = self.plots.remove(from);
+        self.plots.insert(to, p);
+        // the shown plot stays shown
+        if let Some(id) = active_id {
+            self.active = self.plots.iter().position(|p| p.cfg.id == id).unwrap_or(0);
+        }
+        true
+    }
+
     pub fn remove_plot(&mut self, i: usize) {
-        if i < self.plots.len() {
-            self.plots.remove(i);
+        if let Some(cfg) = self.remove_plot_raw(i) {
+            self.push_undo(UndoAction::Removed {
+                index: i,
+                cfg: Box::new(cfg),
+            });
+        }
+    }
+
+    fn remove_plot_raw(&mut self, i: usize) -> Option<PlotConfig> {
+        let removed = (i < self.plots.len()).then(|| self.plots.remove(i).cfg);
+        if removed.is_some() && i < self.active {
             // the shown plot stays shown when a plot above it is deleted
-            if i < self.active {
-                self.active -= 1;
-            }
+            self.active -= 1;
         }
         if self.active >= self.plots.len() {
             self.active = self.plots.len().saturating_sub(1);
         }
+        removed
+    }
+
+    // ---- undo / redo ------------------------------------------------------------
+
+    pub fn push_undo(&mut self, a: UndoAction) {
+        self.undo.push(a);
+        if self.undo.len() > 200 {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(a) = self.undo.pop()
+            && let Some(inverse) = self.apply_undo(a)
+        {
+            self.redo.push(inverse);
+        }
+    }
+
+    pub fn redo(&mut self) {
+        if let Some(a) = self.redo.pop()
+            && let Some(inverse) = self.apply_undo(a)
+        {
+            self.undo.push(inverse);
+        }
+    }
+
+    /// Reverts an action; returns the action that re-does it.
+    fn apply_undo(&mut self, a: UndoAction) -> Option<UndoAction> {
+        let text;
+        let inverse = match a {
+            UndoAction::Markers { id, markers } => {
+                let i = self.plots.iter().position(|p| p.cfg.id == id)?;
+                let current = std::mem::replace(&mut self.plots[i].cfg.markers, markers);
+                self.active = i;
+                text = "markers";
+                UndoAction::Markers { id, markers: current }
+            }
+            UndoAction::Removed { index, cfg } => {
+                let id = cfg.id;
+                let index = index.min(self.plots.len());
+                self.plots.insert(
+                    index,
+                    PlotEntry {
+                        cfg: *cfg,
+                        state: PlotState::default(),
+                        ui: PlotUiState::default(),
+                    },
+                );
+                self.active = index;
+                text = "plot restored";
+                UndoAction::Added { id }
+            }
+            UndoAction::Added { id } => {
+                let index = self.plots.iter().position(|p| p.cfg.id == id)?;
+                let cfg = self.remove_plot_raw(index)?;
+                text = "plot removed";
+                UndoAction::Removed {
+                    index,
+                    cfg: Box::new(cfg),
+                }
+            }
+            UndoAction::Moved { from, to } => {
+                self.move_plot_raw(to, from).then_some(())?;
+                self.active = from;
+                text = "plot moved back";
+                UndoAction::Moved { from: to, to: from }
+            }
+        };
+        self.set_status(format!("Undo / redo: {text}"), false);
+        Some(inverse)
     }
 
     pub fn plots_using(&self, key: &str) -> usize {
@@ -1030,6 +1161,8 @@ impl App {
 
     /// Empties the project (data sources, plots, functions).
     fn reset_project(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
         // fonts loaded from files belong to the workspace that loaded them
         if self.fonts.faces.iter().any(|f| f.user) {
             let mut book = (*self.fonts).clone();

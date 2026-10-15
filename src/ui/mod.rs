@@ -53,6 +53,19 @@ fn shortcuts(app: &mut App, ctx: &egui::Context) {
     if ctx.input_mut(|i| i.consume_shortcut(&save)) {
         app.save_workspace_dialog(false);
     }
+    // undo / redo of the plots (markers, deleted / added / moved plots); in a
+    // text field, Ctrl+Z stays the text undo
+    let typing = ctx.memory(|m| m.focused().is_some());
+    if app.page == Page::Plots && !typing {
+        let redo2 = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+        let redo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);
+        let undo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
+        if ctx.input_mut(|i| i.consume_shortcut(&redo2) || i.consume_shortcut(&redo)) {
+            app.redo();
+        } else if ctx.input_mut(|i| i.consume_shortcut(&undo)) {
+            app.undo();
+        }
+    }
 }
 
 fn top_bar(app: &mut App, ui: &mut Ui) {

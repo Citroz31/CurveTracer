@@ -12,7 +12,7 @@ use egui::{
 use super::{ERR, NAVY, NAVY_LIGHT, WARN, plot_settings, section, thousands};
 use crate::app::App;
 use crate::plot::render::ImageFormat;
-use crate::plot::view::{EditTarget, show_plot};
+use crate::plot::view::{EditTarget, show_plot, show_thumbnail};
 
 /// Gap between two stacked plots.
 const GAP: f32 = 16.0;
@@ -30,6 +30,8 @@ enum Action {
     FitY,
     Previous,
     Axes,
+    Undo,
+    Redo,
 }
 
 pub fn show(app: &mut App, ui: &mut Ui) {
@@ -86,6 +88,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             p.state.fit_y(&p.cfg);
         }
         Some(Action::Previous) => app.plots[i].state.previous_view(),
+        Some(Action::Undo) => app.undo(),
+        Some(Action::Redo) => app.redo(),
         Some(Action::Axes) => {
             let pos = ui.ctx().content_rect().center() - Vec2::new(180.0, 160.0);
             app.plots[i].state.open_editor(EditTarget::All, pos);
@@ -141,7 +145,12 @@ fn strip(app: &mut App, ui: &mut Ui) {
 
     let fonts = Arc::clone(&app.fonts);
     let w = ui.available_width();
-    let thumb_h = (w * 0.62).round();
+    // miniatures with the proportions of the real plot area, scaled down
+    let area = app.plot_area;
+    let aspect = (area.y / area.x.max(1.0)).clamp(0.35, 1.6);
+    let thumb_w = w - 8.0;
+    let thumb_h = (thumb_w * aspect).round();
+    let scale = thumb_w / area.x.max(1.0);
     let row_h = thumb_h + 30.0;
     let n = app.plots.len();
     // keep the current plot visible when it changes (wheel, keyboard)
@@ -149,21 +158,47 @@ fn strip(app: &mut App, ui: &mut Ui) {
     let last: Option<usize> = ui.data(|d| d.get_temp(last_id));
     let follow = last != Some(app.active);
     ui.data_mut(|d| d.insert_temp(last_id, app.active));
+    let drag_id = Id::new("ct_strip_drag");
+    let dragging: Option<usize> = ui.data(|d| d.get_temp(drag_id));
 
     let mut select = None;
     let mut menu_action: Option<(usize, &str)> = None;
+    let mut drop_to: Option<usize> = None;
+    let mut rows: Vec<(usize, Rect)> = Vec::new();
+    let strip_rect = ui.available_rect_before_wrap();
     let mut scroll = egui::ScrollArea::vertical()
         .id_salt("ct_strip_scroll")
         .auto_shrink([false, false]);
-    if follow {
+    if follow && dragging.is_none() {
         let spacing = ui.spacing().item_spacing.y;
         let target = app.active as f32 * (row_h + spacing) - (ui.available_height() - row_h) * 0.5;
         scroll = scroll.vertical_scroll_offset(target.max(0.0));
     }
+    let pointer = ui.input(|i| i.pointer.interact_pos());
     scroll.show_rows(ui, row_h, n, |ui, range| {
         for i in range {
             let active = i == app.active;
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, row_h), Sense::click());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, row_h), Sense::hover());
+            rows.push((i, rect));
+            // the thumbnail first, then the whole card on top: a click anywhere
+            // on the card selects it (the miniature plot does not catch it)
+            let trect = Rect::from_min_size(rect.min + Vec2::new(4.0, 26.0), Vec2::new(thumb_w, thumb_h));
+            let bg_idx = ui.painter().add(egui::Shape::Noop);
+            {
+                let p = &mut app.plots[i];
+                show_thumbnail(ui, trect, &mut p.cfg, &mut p.state, &fonts, scale);
+            }
+            let resp = ui
+                .interact(
+                    rect,
+                    Id::new(("ct_strip_card", app.plots[i].cfg.id)),
+                    Sense::click_and_drag(),
+                )
+                .on_hover_cursor(if dragging.is_some() {
+                    egui::CursorIcon::Grabbing
+                } else {
+                    egui::CursorIcon::PointingHand
+                });
             let painter = ui.painter_at(rect);
             let bg = if active {
                 NAVY_LIGHT.gamma_multiply(0.16)
@@ -172,9 +207,19 @@ fn strip(app: &mut App, ui: &mut Ui) {
             } else {
                 Color32::TRANSPARENT
             };
-            painter.rect_filled(rect, 6.0, bg);
+            ui.painter().set(bg_idx, egui::Shape::rect_filled(rect, 6.0, bg));
             if active {
                 painter.rect_stroke(rect.shrink(1.0), 6.0, Stroke::new(2.0, NAVY_LIGHT), StrokeKind::Inside);
+            } else if resp.hovered() {
+                painter.rect_stroke(
+                    rect.shrink(1.0),
+                    6.0,
+                    Stroke::new(1.0, NAVY_LIGHT.gamma_multiply(0.6)),
+                    StrokeKind::Inside,
+                );
+            }
+            if dragging == Some(i) {
+                painter.rect_filled(rect, 6.0, Color32::from_white_alpha(150));
             }
             let badge = Rect::from_min_size(rect.min + Vec2::new(6.0, 5.0), Vec2::new(22.0, 18.0));
             painter.rect_filled(badge, 4.0, if active { NAVY } else { Color32::from_gray(140) });
@@ -185,36 +230,127 @@ fn strip(app: &mut App, ui: &mut Ui) {
                 egui::FontId::proportional(12.0),
                 Color32::WHITE,
             );
-            let name = &app.plots[i].cfg.name;
             let galley = painter.layout(
-                name.clone(),
+                app.plots[i].cfg.name.clone(),
                 egui::FontId::proportional(13.0),
                 ui.visuals().text_color(),
                 rect.width() - 40.0,
             );
             painter.galley(Pos2::new(badge.right() + 6.0, rect.top() + 6.0), galley, Color32::BLACK);
-            let trect = Rect::from_min_size(rect.min + Vec2::new(4.0, 26.0), Vec2::new(w - 8.0, thumb_h));
-            let p = &mut app.plots[i];
-            show_plot(ui, trect, &mut p.cfg, &mut p.state, &fonts, false);
+
             if resp.clicked() {
                 select = Some(i);
             }
-            resp.on_hover_text("Click to show this plot (or use the mouse wheel on the plot)")
+            if resp.drag_started() {
+                ui.data_mut(|d| d.insert_temp(drag_id, i));
+            }
+            if resp.drag_stopped() {
+                ui.data_mut(|d| d.remove::<usize>(drag_id));
+                drop_to = Some(usize::MAX); // computed below from the pointer
+            }
+            // scroll the list while dragging near its top / bottom
+            if dragging.is_some()
+                && let Some(p) = pointer
+            {
+                if p.y < strip_rect.top() + 30.0 {
+                    ui.scroll_with_delta(Vec2::new(0.0, 6.0));
+                } else if p.y > strip_rect.bottom() - 30.0 {
+                    ui.scroll_with_delta(Vec2::new(0.0, -6.0));
+                }
+            }
+            resp.on_hover_text("Click: show this plot · drag: move it · right-click: duplicate, delete…")
                 .context_menu(|ui| {
-                    for (label, a) in [
-                        ("Copy / Split Plot", "dup"),
-                        ("⏶ Move up", "up"),
-                        ("⏷ Move down", "down"),
-                        ("🗑 Delete", "del"),
+                    ui.set_min_width(190.0);
+                    for (label, a, enabled) in [
+                        ("⎘ Duplicate (Copy / Split)   Ctrl+D", "dup", true),
+                        ("⏶ Move up", "up", i > 0),
+                        ("⏷ Move down", "down", i + 1 < n),
+                        ("⏫ Move to the top", "top", i > 0),
+                        ("⏬ Move to the bottom", "bottom", i + 1 < n),
                     ] {
-                        if ui.button(label).clicked() {
+                        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
                             menu_action = Some((i, a));
                             ui.close();
                         }
                     }
+                    ui.separator();
+                    if ui.button(RichText::new("🗑 Delete   Del").color(super::ERR)).clicked() {
+                        menu_action = Some((i, "del"));
+                        ui.close();
+                    }
+                    ui.separator();
+                    ui.label(RichText::new("Ctrl+Z undoes it").weak().small());
                 });
         }
     });
+
+    // ---- drag & drop: insertion point under the pointer ---------------------------
+    let insertion = |p: Pos2| -> usize {
+        rows.iter()
+            .find(|(_, r)| p.y < r.center().y)
+            .map_or_else(|| rows.last().map_or(0, |(i, _)| i + 1), |(i, _)| *i)
+    };
+    if let (Some(from), Some(p)) = (dragging.or(drop_to.and(None)), pointer) {
+        let at = insertion(p);
+        if let Some(y) = rows
+            .iter()
+            .find(|(i, _)| *i == at)
+            .map(|(_, r)| r.top() - 1.0)
+            .or_else(|| rows.last().map(|(_, r)| r.bottom() + 1.0))
+            && at != from
+            && at != from + 1
+        {
+            let painter = ui
+                .ctx()
+                .layer_painter(egui::LayerId::new(egui::Order::Foreground, drag_id));
+            painter.line_segment(
+                [
+                    Pos2::new(strip_rect.left() + 4.0, y),
+                    Pos2::new(strip_rect.right() - 4.0, y),
+                ],
+                Stroke::new(3.0, NAVY_LIGHT),
+            );
+            painter.circle_filled(Pos2::new(strip_rect.left() + 6.0, y), 4.0, NAVY_LIGHT);
+        }
+        // ghost of the dragged plot
+        let painter = ui
+            .ctx()
+            .layer_painter(egui::LayerId::new(egui::Order::Tooltip, drag_id));
+        let text = format!(
+            "{}. {}",
+            from + 1,
+            app.plots.get(from).map_or("", |p| p.cfg.name.as_str())
+        );
+        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), Color32::WHITE);
+        let r = Rect::from_min_size(p + Vec2::new(12.0, 8.0), galley.size() + Vec2::new(12.0, 6.0));
+        painter.rect_filled(r, 5.0, NAVY.gamma_multiply(0.9));
+        painter.galley(r.min + Vec2::new(6.0, 3.0), galley, Color32::WHITE);
+    }
+    if drop_to.is_some()
+        && let (Some(from), Some(p)) = (dragging, pointer)
+    {
+        let at = insertion(p);
+        // `at` = position before the move; once removed, the plots below shift up
+        let to = if at > from { at - 1 } else { at };
+        app.move_plot_to(from, to.min(n.saturating_sub(1)));
+    }
+
+    // ---- keyboard on the list -------------------------------------------------------
+    let typing = ui.ctx().memory(|m| m.focused().is_some());
+    if !typing && ui.rect_contains_pointer(strip_rect) {
+        let (del, dup) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::Delete),
+                i.modifiers.command && i.key_pressed(egui::Key::D),
+            )
+        });
+        if del {
+            menu_action = Some((app.active, "del"));
+        } else if dup {
+            menu_action = Some((app.active, "dup"));
+        }
+    }
+
     if let Some(i) = select {
         app.active = i;
     }
@@ -222,6 +358,8 @@ fn strip(app: &mut App, ui: &mut Ui) {
         Some((i, "dup")) => app.duplicate_plot(i),
         Some((i, "up")) => app.move_plot(i, -1),
         Some((i, "down")) => app.move_plot(i, 1),
+        Some((i, "top")) => app.move_plot_to(i, 0),
+        Some((i, "bottom")) => app.move_plot_to(i, n.saturating_sub(1)),
         Some((i, "del")) => app.remove_plot(i),
         _ => {}
     }
@@ -302,6 +440,7 @@ fn toolbar(app: &mut App, ui: &mut Ui) -> Option<Action> {
         ui.separator();
         let st = &app.plots[i].state;
         let has_history = !st.history.is_empty();
+        let (can_undo, can_redo) = (app.can_undo(), app.can_redo());
         let mut b = |ui: &mut Ui, enabled: bool, text: &str, tip: &str, a: Action| {
             if ui
                 .add_enabled(enabled, egui::Button::new(text))
@@ -333,6 +472,15 @@ fn toolbar(app: &mut App, ui: &mut Ui) -> Option<Action> {
             "Go back to the previous zoom",
             Action::Previous,
         );
+        ui.separator();
+        b(
+            ui,
+            can_undo,
+            "↶",
+            "Undo (Ctrl+Z): markers, deleted / duplicated / moved plots",
+            Action::Undo,
+        );
+        b(ui, can_redo, "↷", "Redo (Ctrl+Y)", Action::Redo);
         b(
             ui,
             true,
@@ -444,6 +592,8 @@ fn navigator(app: &mut App, ui: &mut Ui) {
     let last = (pos.ceil().max(0.0) as usize).min(n - 1);
     let fonts = Arc::clone(&app.fonts);
     let box_zoom = app.box_zoom;
+    app.plot_area = area.size();
+    let mut marker_changes = Vec::new();
     ui.scope_builder(UiBuilder::new().max_rect(area), |ui| {
         ui.set_clip_rect(area);
         for k in first..=last {
@@ -453,7 +603,11 @@ fn navigator(app: &mut App, ui: &mut Ui) {
             }
             let p = &mut app.plots[k];
             p.state.box_zoom = box_zoom;
+            let before = p.cfg.markers.clone();
             show_plot(ui, r, &mut p.cfg, &mut p.state, &fonts, true);
+            if p.cfg.markers != before {
+                marker_changes.push((p.cfg.id, before));
+            }
             if k < last {
                 let y = r.bottom() + GAP * 0.5;
                 ui.painter().line_segment(
@@ -464,6 +618,9 @@ fn navigator(app: &mut App, ui: &mut Ui) {
         }
     });
     ui.allocate_rect(area, Sense::hover());
+    for (id, markers) in marker_changes {
+        app.push_undo(crate::app::UndoAction::Markers { id, markers });
+    }
 
     // ---- position indicator (right edge) ----------------------------------------
     if n > 1 {

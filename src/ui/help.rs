@@ -38,7 +38,8 @@ pub fn show(ui: &mut Ui) {
             ui.label("• Toolbar: Pan or Zoom area (left-drag draws the rectangle), zoom + / −, Fit Y, Previous view, Original scale, Axes & title.");
             ui.label("• Click on an axis to rename it and change its range / tick step; click on the title to edit it.");
             ui.label("• Double-click: original scale · hover a curve: read its values.");
-            ui.label("• Click on a curve: pin a marker showing x / y (click it again to remove it).");
+            ui.label("• Click on a curve: pin a marker showing x / y (click it again to remove it). Ctrl+Z / Ctrl+Y: undo / redo.");
+            ui.label("• Plot list (left): click a card to show it, drag it to reorder, right-click to duplicate / move / delete (Del, Ctrl+D).");
             ui.label("• The legend can be dragged with the mouse. Drop it on an edge of the graph to place it outside: the plot shrinks to make room. Click an entry to hide / show a curve.");
         });
         section(ui, "4. Layout & traces", |ui| {

@@ -12,6 +12,16 @@
 > Les étapes pour supprimer définitivement cet avertissement (signature de code) sont décrites dans `docs/SIGNATURE_WINDOWS.md`.
 > `SHA256SUMS.txt` donne l'empreinte de chaque fichier (vérification, liste blanche du service informatique).
 
+## Nouveautés de la version 0.3.5
+
+- **Lissage nettement meilleur sur les courbes à peu de points** : nouvelle **spline de lissage** (méthode par défaut, un seul réglage « Smoothness »)
+  et **LOESS** (régression locale, option robuste) ; la courbe lissée est tracée comme une **courbe continue** et non plus en segments
+  entre les points (option *Smooth curve between the points*, pour toutes les méthodes).
+- **Liste des graphes façon PowerPoint** : clic n'importe où sur la carte, **glisser-déposer** pour réordonner, **clic droit** pour
+  dupliquer / déplacer / supprimer, touches **Suppr** et **Ctrl+D**.
+- **Miniatures fidèles** : mêmes proportions et même mise en page que le graphe réel (et que l'image exportée dans la page Export).
+- **Annuler / rétablir (Ctrl+Z / Ctrl+Y)** : curseurs posés ou retirés, graphes supprimés, dupliqués ou déplacés ; boutons ↶ ↷.
+
 ## Nouveautés de la version 0.3.4
 
 - Exécutable Windows avec **icône**, **informations de version et d'éditeur** (*Propriétés → Détails*) et manifeste standard (droits utilisateur, chemins longs) ; icône de la fenêtre.

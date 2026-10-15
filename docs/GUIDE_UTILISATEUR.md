@@ -1,6 +1,6 @@
 ---
 title: "CurveTracer — Guide utilisateur"
-subtitle: "Version 0.3.4"
+subtitle: "Version 0.3.5"
 ---
 
 # 1. Présentation
@@ -213,8 +213,18 @@ La **molette de la souris** sur le graphe fait défiler vers le graphe
 **Page Up / Page Down**, cliquer une **miniature** de la liste à gauche, ou
 un point de l'indicateur à droite du graphe (le point bleu = graphe affiché).
 La liste à gauche (redimensionnable) montre le numéro, le nom et une
-miniature de chaque graphe ; un **clic droit** sur une miniature propose
-**Copy / Split Plot**, **Move up / Move down** (réordonner) et **Delete**.
+**miniature fidèle** de chaque graphe (mêmes proportions et même mise en page
+que le graphe affiché). Comme les diapositives d'un PowerPoint :
+
+- **clic n'importe où sur la carte** : affiche ce graphe ;
+- **glisser-déposer** une carte : la déplace (une ligne bleue montre la
+  position d'arrivée ; la liste défile si on approche du bord) ;
+- **clic droit** : *Duplicate (Copy / Split)*, *Move up / down*, *Move to
+  the top / bottom*, *Delete* ;
+- clavier, souris sur la liste : **Suppr** supprime le graphe affiché,
+  **Ctrl+D** le duplique ;
+- **Ctrl+Z** annule (un graphe supprimé revient à sa place), **Ctrl+Y**
+  rétablit.
 
 > Le zoom à la molette se fait maintenant avec **Ctrl + molette** (ou les
 > boutons 🔍 de la barre d'outils).
@@ -280,13 +290,15 @@ moyenne (*Mean*), médiane, min, max, somme, **RMS**, écart-type, étendue
 
 ### Lissage (*Smoothing*)
 
-![Lissage Savitzky–Golay, courbes brutes conservées en clair](screenshots/smoothing.png)
+![Spline de lissage sur 15 points par courbe, points bruts conservés en clair](screenshots/smoothing.png)
 
 Cocher **Smooth the curves** pour lisser toutes les courbes du graphe (après le
 traitement ci-dessus s'il est activé). Méthodes (*Method*) :
 
 | Méthode | Principe | Réglage |
 |---|---|---|
+| **Smoothing spline** (recommandée, par défaut) | courbe continue et lisse qui suit la tendance des points (spline cubique pénalisée) ; excellente **même avec très peu de points** | *Smoothness* 0–100 % (0 = passe par les points, 100 % ≈ droite) |
+| **LOESS** | régression locale pondérée sur une fraction des points autour de chaque X ; *Robust* ignore les points aberrants | *Span* (%), ajustement linéaire / quadratique |
 | **Moving average** | moyenne des N points voisins ; simple, aplatit les pics | *Window* (points) |
 | **Gaussian** | moyenne pondérée en cloche, plus douce que la moyenne glissante | *σ* (points) |
 | **Savitzky–Golay** | ajuste un polynôme sur N points autour de chaque point : retire le bruit en gardant hauteur et largeur des pics, pentes et ondulations (idéal pour les S-paramètres) | *Window* + *Polynomial order* (2–3 conseillé) |
@@ -294,12 +306,18 @@ traitement ci-dessus s'il est activé). Méthodes (*Method*) :
 | **Exponential (zero-phase)** | moyenne exponentielle aller puis retour (pas de décalage de la courbe) | *Span* (points) |
 | **Moving average (X width)** | moyenne des points à ± largeur / 2 sur l'axe X, pour un pas en X irrégulier | *Width* (unités de X, ex. 0.5 GHz) |
 
-- **Passes** : applique le lissage plusieurs fois (plus lisse).
+- **Passes** : applique le lissage plusieurs fois (plus lisse ; méthodes à fenêtre).
+- **Display → Smooth curve between the points** (coché par défaut) : la
+  courbe lissée est tracée comme une **courbe continue** (400 points par
+  défaut) au lieu de segments droits entre les points : indispensable quand la
+  courbe a peu de points. Pour les méthodes à fenêtre, l'interpolation est
+  monotone (pas de dépassement : les marches restent des marches).
 - **Keep the raw curves** : garde les courbes brutes en clair sous les courbes
   lissées (en trait épais), dont la légende indique la méthode
   (`SG 41 pts, ord 3`).
-- **Presets** : *Light*, *Medium*, *Strong* (Savitzky–Golay 7 / 15 / 41
-  points) et *Remove spikes* (médiane sur 5 points).
+- **Presets** : *Light*, *Medium*, *Strong* (spline 30 / 50 / 70 %),
+  *Trend* (LOESS robuste sur la moitié des points) et *Remove spikes*
+  (médiane sur 5 points).
 
 Aux extrémités, la fenêtre se réduit symétriquement (Savitzky–Golay utilise le
 polynôme de la première / dernière fenêtre) : les bords ne sont pas décalés.
@@ -382,6 +400,7 @@ Les polices proposées : *Proportional*, *Monospace*, et les polices installées
 | Survol | valeurs x / y de la courbe la plus proche |
 | **Clic sur une courbe** | pose un **curseur** avec ses valeurs x / y |
 | Clic sur un curseur | le supprime |
+| **Ctrl+Z / Ctrl+Y** | annule / rétablit les curseurs posés ou retirés, et les graphes supprimés, dupliqués ou déplacés (boutons ↶ ↷ de la barre d'outils) |
 | Clic droit | menu : *Reset view*, *Previous view*, *Axes & title…*, *Clear markers* |
 
 **Outils de la barre d'outils** (2ᵉ ligne) :
