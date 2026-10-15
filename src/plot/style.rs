@@ -128,7 +128,7 @@ pub fn trace_styles(cfg: &PlotConfig, data: &PlotData) -> Vec<TraceStyle> {
             }
             let mut marker = d.marker;
             let mut visible = true;
-            let mut label = t.label.clone();
+            let mut label = rename_variables(&t.label, &cfg.legend_names);
             if let Some(o) = cfg.overrides.get(&t.key) {
                 if let Some(c) = o.color {
                     color = c;
@@ -162,6 +162,39 @@ pub fn trace_styles(cfg: &PlotConfig, data: &PlotData) -> Vec<TraceStyle> {
             }
         })
         .collect()
+}
+
+/// Replaces the variable (column) names of a legend label, e.g.
+/// "S21db | Set_TempC=-40" → "Gain | Temperature=-40". A name is replaced
+/// where it starts the label or follows ", " / "| ", and is followed by "=",
+/// " |" or the end of the label.
+pub fn rename_variables(label: &str, names: &[(String, String)]) -> String {
+    let mut out = label.to_owned();
+    for (from, to) in names {
+        let (from, to) = (from.trim(), to.trim());
+        if from.is_empty() || to.is_empty() || from == to {
+            continue;
+        }
+        let mut res = String::with_capacity(out.len());
+        let mut i = 0;
+        while i < out.len() {
+            let rest = &out[i..];
+            let before_ok = i == 0 || out[..i].ends_with(", ") || out[..i].ends_with("| ") || out[..i].ends_with('(');
+            if before_ok && rest.starts_with(from) {
+                let after = &rest[from.len()..];
+                if after.is_empty() || after.starts_with('=') || after.starts_with(" |") || after.starts_with(" (") {
+                    res.push_str(to);
+                    i += from.len();
+                    continue;
+                }
+            }
+            let c = rest.chars().next().expect("char");
+            res.push(c);
+            i += c.len_utf8();
+        }
+        out = res;
+    }
+    out
 }
 
 /// Legend row metrics (in pixels, before any font measurement).
@@ -246,6 +279,25 @@ impl LegendMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legend_variables_renamed() {
+        let names = vec![
+            ("Set_TempC".to_owned(), "Temperature".to_owned()),
+            ("S21db".to_owned(), "Gain".to_owned()),
+        ];
+        assert_eq!(
+            rename_variables("S21db | Set_TempC=-40.0", &names),
+            "Gain | Temperature=-40.0"
+        );
+        assert_eq!(
+            rename_variables("SN=1, Set_TempC=25 (mean)", &names),
+            "SN=1, Temperature=25 (mean)"
+        );
+        assert_eq!(rename_variables("S21db", &names), "Gain");
+        // not a whole name: unchanged
+        assert_eq!(rename_variables("S21dbraw | X=1", &names), "S21dbraw | X=1");
+    }
 
     #[test]
     fn temperature_colors() {

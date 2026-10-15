@@ -1,6 +1,6 @@
 ---
 title: "CurveTracer — Guide utilisateur"
-subtitle: "Version 0.4.1"
+subtitle: "Version 0.5.0"
 ---
 
 # 1. Présentation
@@ -15,6 +15,13 @@ de façon rapide et interactive. Le principe :
 4. on **exporte** les graphes en PowerPoint, en images PNG / SVG ou en CSV
    (page *Export Plots*), et les **données** elles-mêmes en CSV ou en
    Touchstone `.s2p`, lissées ou non (page *Export Data*).
+
+Nouveautés de la version 0.5.0 : chargement des fichiers **Touchstone**
+`.s1p` … `.snp` (§ 3), export **`.snp`** avec détection du nombre de ports et
+choix des ports écrits (§ 9), graphe affiché **au format des images
+exportées (6 : 4,2) et agrandi** à toute la place disponible (§ 5), exports
+PNG / SVG / PowerPoint **à l'échelle de l'écran** (§ 8), **renommage des
+entrées et des variables de la légende** par clic droit (§ 6).
 
 Nouveautés de la version 0.4.1 : images exportées au format **6 × 4,2 in**
 (ou format demandé à l'export, § 8), police et taille de la légende par
@@ -124,8 +131,18 @@ non enregistrées, CurveTracer demande d'abord **Save / Don't save / Cancel**.
 ![Page File Select](screenshots/files.png)
 
 - **Open data files…** (ou glisser-déposer sur la fenêtre) : formats
-  `csv`, `txt`, `tsv`, `dat`, `xlsx`, `xlsm`, `xlsb`, `xls`, `ods`.
+  `csv`, `txt`, `tsv`, `dat`, `xlsx`, `xlsm`, `xlsb`, `xls`, `ods`, et
+  fichiers **Touchstone** `.s1p`, `.s2p`, `.s3p`, `.s4p` … `.snp`.
   Plusieurs fichiers peuvent être chargés en même temps.
+- **Fichiers Touchstone** : versions 1 et 2, formats DB / MA / RI, toutes
+  unités de fréquence ; le nombre de ports vient de l'extension (ou du mot-clé
+  `[Number of Ports]`). Le fichier devient un tableau avec une colonne
+  **Freq** (Hz) et deux colonnes par paramètre : **S11db**, **S11deg**,
+  **S12db**, **S12deg**, **S21db**… (au-delà de 9 ports : `S1_10db`). Les
+  commentaires du fichier sont dans **File information**, la puce indique
+  « Touchstone · n port(s) ». Un nouveau graphe sur ce fichier affiche
+  directement **S21** (S11 pour un 1-port) en fonction de la fréquence en GHz ;
+  le de-embedding et l'export de données fonctionnent comme pour un CSV.
 - La détection est **automatique** :
   - délimiteur (`,` `;` tabulation `|`) ;
   - **ligne d'en-tête** : les lignes d'information placées au-dessus des noms de
@@ -222,6 +239,11 @@ Cliquer **Add Plot** sur un fichier (page *File Select*) ou **+ New** au-dessus
 de la liste des graphes.
 
 ![Page Plots](screenshots/plots.png)
+
+Le graphe est affiché **au format des images exportées** (6 : 4,2 par défaut,
+voir § 8) et **agrandi** pour occuper toute la place disponible : ce que l'on
+voit est ce qui sera exporté (proportions, taille relative des textes et de
+la légende).
 
 **Passer d'un graphe à l'autre** : les graphes sont **empilés verticalement**.
 La **molette de la souris** sur le graphe fait défiler vers le graphe
@@ -437,9 +459,21 @@ Les polices proposées : *Proportional*, *Monospace*, et les polices installées
 elle passe **à l'extérieur du cadre** et le graphe se réduit automatiquement
 pour lui laisser la place. Un clic sur une entrée masque / affiche la courbe
 correspondante. Quand il y a beaucoup de courbes, la légende se répartit sur
-plusieurs colonnes. **Clic droit sur la légende** : police, taille (en
-saisie ou 9 / 11 / 13 / 16 / 20), couleur du texte, fond, bordure, ou
-masquer la légende.
+plusieurs colonnes. **Clic droit sur la légende** :
+
+- **This entry** : nouveau texte de l'entrée cliquée (vide = texte
+  automatique) ;
+- **Variable names** : nom affiché à la place de chaque **variable**
+  (colonnes Y et colonnes de séries) dans **toutes** les entrées — par
+  exemple `S21db` → *Gain* et `Set_TempC` → *Temp* donnent « Gain |
+  Temp=-40.0 » ; les exports (PNG, SVG, PowerPoint) utilisent ces noms ;
+- police, taille (en saisie ou 9 / 11 / 13 / 16 / 20), couleur du texte, fond,
+  bordure, ou masquer la légende.
+
+Le menu reste ouvert pendant la saisie ; un clic à l'extérieur ou **Échap**
+le ferme.
+
+![Clic droit sur une entrée de la légende](screenshots/legend_menu.png)
 
 ![Légende placée à l'extérieur, curseur posé](screenshots/legend_out.png)
 
@@ -506,8 +540,10 @@ Exemples :
   **6 × 4,2 in à 300 dpi** (1800 × 1260 px), le format des rapports de test.
   Les PNG portent leur résolution et les SVG leur taille en pouces : Word ou
   PowerPoint les insèrent directement à 6 × 4,2 in ; dans le PowerPoint
-  exporté, chaque graphe est placé à cette taille. Textes et traits gardent
-  leur taille d'écran. Le bouton **6 × 4.2** revient au format standard.
+  exporté, chaque graphe est placé à cette taille. L'image est **à l'échelle
+  du graphe affiché** : textes, légende, marges et traits ont les mêmes
+  proportions qu'à l'écran (une légende qui tient à l'écran tient dans
+  l'export). Le bouton **6 × 4.2** revient au format standard.
 - **Format demandé à l'export** : si la taille n'est pas dans le rapport
   **6 : 4,2**, ou si **Ask at each export** est coché, la fenêtre *Image
   format* s'ouvre avant chaque export (PowerPoint, images, boutons PNG / SVG
@@ -612,14 +648,26 @@ rouge, limites de la bande en bleu).
 - **CSV** : séparateur virgule, point-virgule ou tabulation ; **decimal
   comma** pour un Excel français (avec le séparateur `;`). Colonnes écrites :
   les colonnes de courbe (SN, température…), X, puis les colonnes choisies.
-- **Touchstone .s2p** : un fichier par courbe, format **DB** (dB / angle),
+- **Touchstone (.snp)** : un fichier par courbe, format **DB** (dB / angle),
   **MA** (module / angle) ou **RI** (réel / imaginaire), unité de fréquence
   (Hz … GHz), impédance de référence **R**. *Frequency unit of the data* :
-  unité de la colonne X (détectée automatiquement). Les colonnes S11 … S22
-  sont reconnues par leur nom (`S21db`, `S21deg`…) ; *Columns…* permet de les
-  choisir. Un paramètre absent est écrit à 0 (et signalé dans l'en-tête du
-  fichier), une phase absente vaut 0°. L'en-tête de chaque `.s2p` rappelle la
-  source, le de-embedding, la courbe et le lissage de chaque paramètre.
+  unité de la colonne X (détectée automatiquement).
+  - **Nombre de ports** : déterminé à partir des colonnes S-paramètres
+    reconnues par leur nom (`S21db`, `S21deg`, `S31 [dB]`, `S1_10db`…) :
+    « *4 port(s) in the data* ». Les cases **ports written** restreignent
+    l'export : décocher des ports écrit un réseau plus petit, renuméroté
+    (ports 2 et 4 d'un 4-ports → fichier `.s2p` dont S21 est le S42 des
+    données). L'extension suit : `.s1p`, `.s2p`, `.s3p`, `.s4p`…
+  - « *n parameters found* » indique si tous les paramètres sont présents ;
+    *Columns…* permet de choisir la colonne de chaque paramètre. Un paramètre
+    absent est écrit à 0 (et signalé dans l'en-tête), une phase absente vaut
+    0°.
+  - Mise en page Touchstone 1 : 2-ports sur une ligne (S11 S21 S12 S22),
+    au-delà une ligne par rangée de la matrice (4 paramètres par ligne au
+    plus). L'en-tête rappelle la source, le de-embedding, la courbe, les ports
+    écrits et le lissage de chaque paramètre.
+
+![Export Touchstone : ports détectés et ports écrits](screenshots/export_snp.png)
 - **Folder** : le dossier de destination (*📂 Choose…*). Les fichiers de même
   nom sont remplacés.
 - **💾 Export N file(s)** : écrit les fichiers en tâche de fond (barre de

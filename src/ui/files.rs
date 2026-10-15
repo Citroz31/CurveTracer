@@ -340,7 +340,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ui.heading("Add Data Source");
         ui.add_space(4.0);
         section(ui, "Open files", |ui| {
-            ui.label("CSV / TXT (any delimiter) and Excel files (xlsx, xlsm, xlsb, xls, ods).");
+            ui.label("CSV / TXT (any delimiter), Excel files (xlsx, xlsm, xlsb, xls, ods) and Touchstone files (.s1p … .snp).");
             ui.add_space(4.0);
             if ui
                 .add(
@@ -437,14 +437,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                                 FileKind::Excel => {
                                     chip(ui, format!("Excel · {}", ds.info.sheet.clone().unwrap_or_default()))
                                 }
+                                FileKind::Touchstone(n) => chip(ui, format!("Touchstone · {n} port(s)")),
                             }
-                            chip(
-                                ui,
-                                match ds.info.header_line {
-                                    Some(h) => format!("header line {h}"),
-                                    None => "no header".to_owned(),
-                                },
-                            );
+                            if !matches!(ds.info.kind, FileKind::Touchstone(_)) {
+                                chip(
+                                    ui,
+                                    match ds.info.header_line {
+                                        Some(h) => format!("header line {h}"),
+                                        None => "no header".to_owned(),
+                                    },
+                                );
+                            }
                             if ds.info.decimal_comma {
                                 chip(ui, "decimal comma");
                             }

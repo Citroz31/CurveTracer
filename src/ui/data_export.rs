@@ -1,5 +1,5 @@
 //! "Export Data" page: choose the data (columns, frequency band, criteria),
-//! the smoothing of every column, the formats (CSV / Touchstone .s2p) and the
+//! the smoothing of every column, the formats (CSV / Touchstone .snp) and the
 //! sorting of the files into folders; preview of the files and of the
 //! smoothing; export in the background.
 
@@ -15,11 +15,11 @@ use super::plot_settings::{filter_editor, new_filter, smoothing_editor};
 use super::{ERR, NAVY, OK_GREEN, WARN, section, thousands};
 use crate::app::App;
 use crate::data::dataset::{Dataset, format_sig};
-use crate::data::deembed::{FreqUnit, find_freq_column, find_sparam_columns};
+use crate::data::deembed::{FreqUnit, find_freq_column};
+use crate::data::touchstone::detect_sparams;
 use crate::data::with_functions;
 use crate::export::data::{
-    self as dx, CsvSep, DataExportConfig, ExportSummary, Plan, Progress, SPARAM_NAMES, SmoothChoice, SplitLevel,
-    TsFormat, is_phase,
+    self as dx, CsvSep, DataExportConfig, ExportSummary, Plan, Progress, SmoothChoice, SplitLevel, TsFormat, is_phase,
 };
 
 struct Job {
@@ -78,7 +78,7 @@ pub fn poll(app: &mut App) {
         Ok(s) => app.set_status(
             format!(
                 "{} file(s) written to {} in {:.1} s",
-                s.csv_files + s.s2p_files,
+                s.csv_files + s.snp_files,
                 dir.display(),
                 s.ms / 1000.0
             ),
@@ -127,8 +127,12 @@ fn init_for(cfg: &mut DataExportConfig, ds: &Dataset) {
     let numeric = |i: usize| ds.columns[i].has_numbers();
     let x = find_freq_column(ds, "").or_else(|| (0..ds.columns.len()).find(|&i| numeric(i)));
     cfg.x = x.map(|i| ds.columns[i].name.clone()).unwrap_or_default();
-    let (db, deg) = find_sparam_columns(ds);
-    let sp: Vec<usize> = (0..4).flat_map(|k| [db[k], deg[k]]).flatten().collect();
+    let sp: Vec<usize> = detect_sparams(ds)
+        .found
+        .iter()
+        .flat_map(|f| [f.2, f.3])
+        .flatten()
+        .collect();
     cfg.columns = if sp.is_empty() {
         (0..ds.columns.len())
             .filter(|&i| Some(i) != x && numeric(i))
@@ -144,7 +148,8 @@ fn init_for(cfg: &mut DataExportConfig, ds: &Dataset) {
     cfg.split.clear();
     cfg.curve_keys.clear();
     cfg.auto_keys = true;
-    cfg.sparams = Default::default();
+    cfg.ports.clear();
+    cfg.sparam_overrides.clear();
 }
 
 pub fn show(app: &mut App, ui: &mut Ui) {
@@ -316,7 +321,7 @@ fn settings(app: &mut App, ui: &mut Ui, ds: &Arc<Dataset>, loaded: &[(String, St
 
     ui.heading("Export Data");
     ui.label(
-        RichText::new("Write the data of your choice as CSV and / or Touchstone (.s2p) files, smoothed or not.").weak(),
+        RichText::new("Write the data of your choice as CSV and / or Touchstone (.snp) files, smoothed or not.").weak(),
     );
     ui.add_space(4.0);
 
@@ -376,16 +381,17 @@ fn settings(app: &mut App, ui: &mut Ui, ds: &Arc<Dataset>, loaded: &[(String, St
                     .hint_text("search…")
                     .desired_width(140.0),
             );
-            let (db, deg) = find_sparam_columns(ds);
-            let sp: Vec<String> = (0..4)
-                .flat_map(|k| [db[k], deg[k]])
+            let sp: Vec<String> = detect_sparams(ds)
+                .found
+                .iter()
+                .flat_map(|f| [f.2, f.3])
                 .flatten()
                 .map(|i| ds.columns[i].name.clone())
                 .collect();
             if !sp.is_empty()
                 && ui
                     .small_button("S-parameters")
-                    .on_hover_text("S11, S21, S12, S22 (dB and phase)")
+                    .on_hover_text("Every S-parameter column (dB and phase)")
                     .clicked()
             {
                 cfg.columns = sp;
@@ -575,7 +581,7 @@ fn settings(app: &mut App, ui: &mut Ui, ds: &Arc<Dataset>, loaded: &[(String, St
         ui.add_space(4.0);
         ui.label(RichText::new("Curves").strong()).on_hover_text(
             "A curve = the points sharing the same values of these columns, sorted by X. Each curve is \
-             smoothed separately and written as one .s2p file.",
+             smoothed separately and written as one Touchstone file.",
         );
         let split_names: Vec<String> = cfg.split.iter().map(|s| s.column.clone()).collect();
         if ui
@@ -666,8 +672,8 @@ fn settings(app: &mut App, ui: &mut Ui, ds: &Arc<Dataset>, loaded: &[(String, St
             if cfg.s2p
                 && let Some(p) = &plan
             {
-                for c in p.sparams.iter().flatten() {
-                    let n = &ds.columns[*c].name;
+                for c in p.ts.columns() {
+                    let n = &ds.columns[c].name;
                     if !cols.contains(n) {
                         cols.push(n.clone());
                     }
@@ -781,8 +787,8 @@ fn settings(app: &mut App, ui: &mut Ui, ds: &Arc<Dataset>, loaded: &[(String, St
             );
         }
         ui.horizontal(|ui| {
-            ui.checkbox(&mut cfg.s2p, RichText::new("Touchstone .s2p").strong())
-                .on_hover_text("One file per curve, with S11, S21, S12, S22");
+            ui.checkbox(&mut cfg.s2p, RichText::new("Touchstone (.snp)").strong())
+                .on_hover_text("One file per curve: .s1p, .s2p, .s4p… depending on the ports written");
             ui.add_enabled_ui(cfg.s2p, |ui| {
                 egui::ComboBox::from_id_salt("dx_ts_format")
                     .selected_text(cfg.ts_format.label())
@@ -824,50 +830,7 @@ fn settings(app: &mut App, ui: &mut Ui, ds: &Arc<Dataset>, loaded: &[(String, St
                             }
                         });
                 });
-                let found = plan.as_ref().map(|p| p.sparams);
-                let summary: Vec<String> = (0..4)
-                    .map(|p| {
-                        let ok = found.is_some_and(|f| f[2 * p].is_some());
-                        format!("{}{}", &SPARAM_NAMES[2 * p][..3], if ok { " ✔" } else { " —" })
-                    })
-                    .collect();
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(summary.join("   ")).weak());
-                    ui.toggle_value(&mut st.show_sparams, "Columns…");
-                });
-                if st.show_sparams {
-                    let mut opts = vec![String::new()];
-                    opts.extend(numeric.iter().cloned());
-                    egui::Grid::new("dx_sparams")
-                        .num_columns(2)
-                        .spacing([10.0, 4.0])
-                        .show(ui, |ui| {
-                            for k in 0..8 {
-                                ui.label(SPARAM_NAMES[k]);
-                                let auto = found
-                                    .and_then(|f| f[k])
-                                    .filter(|_| cfg.sparams[k].is_empty())
-                                    .map(|c| format!("auto: {}", ds.columns[c].name))
-                                    .unwrap_or_else(|| "auto: not found".to_owned());
-                                let shown = if cfg.sparams[k].is_empty() {
-                                    auto
-                                } else {
-                                    cfg.sparams[k].clone()
-                                };
-                                egui::ComboBox::from_id_salt(("dx_sp", k))
-                                    .selected_text(shown)
-                                    .width(220.0)
-                                    .height(300.0)
-                                    .show_ui(ui, |ui| {
-                                        for o in &opts {
-                                            let label = if o.is_empty() { "auto (from the names)" } else { o };
-                                            ui.selectable_value(&mut cfg.sparams[k], o.clone(), label);
-                                        }
-                                    });
-                                ui.end_row();
-                            }
-                        });
-                }
+                touchstone_ports(ui, cfg, st, ds, plan.as_deref(), &numeric);
             });
         }
         ui.add_space(4.0);
@@ -932,9 +895,9 @@ fn export_button(app: &mut App, ui: &mut Ui, ds: &Arc<Dataset>, plan: Option<&Pl
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
                         RichText::new(format!(
-                            "✔ {} CSV + {} .s2p file(s), {} points, in {:.1} s",
+                            "✔ {} CSV + {} Touchstone file(s), {} points, in {:.1} s",
                             s.csv_files,
-                            s.s2p_files,
+                            s.snp_files,
                             thousands(s.points),
                             s.ms / 1000.0
                         ))
@@ -1062,8 +1025,8 @@ fn preview_panel(app: &mut App, ui: &mut Ui, ds: &Arc<Dataset>, info: &[String])
     ui.add_space(6.0);
     let mut cols: Vec<String> = cfg.columns.clone();
     if cfg.s2p {
-        for c in plan.sparams.iter().flatten() {
-            let n = &ds.columns[*c].name;
+        for c in plan.ts.columns() {
+            let n = &ds.columns[c].name;
             if !cols.contains(n) {
                 cols.push(n.clone());
             }
@@ -1213,7 +1176,7 @@ fn file_list(plan: &Plan, csv: bool, s2p: bool) -> Vec<(usize, String)> {
         }
         if s2p {
             for i in g.curves.clone() {
-                let name = plan.s2p[i]
+                let name = plan.snp[i]
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
@@ -1222,4 +1185,111 @@ fn file_list(plan: &Plan, csv: bool, s2p: bool) -> Vec<(usize, String)> {
         }
     }
     out
+}
+
+/// Ports found in the data, choice of the ports written, columns of every S(i, j).
+fn touchstone_ports(
+    ui: &mut Ui,
+    cfg: &mut DataExportConfig,
+    st: &mut DataExportState,
+    ds: &Dataset,
+    plan: Option<&Plan>,
+    numeric: &[String],
+) {
+    let det = detect_sparams(ds);
+    if det.nports == 0 {
+        ui.label(RichText::new("No S-parameter column found (S11db, S21deg…): choose the columns below.").color(WARN));
+    } else {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!("{} port(s) in the data · ports written:", det.nports))
+                .on_hover_text("Uncheck ports to write a smaller network (e.g. ports 1 and 3 of a 4-port as a .s2p)");
+            let mut sel: Vec<usize> = if cfg.ports.is_empty() {
+                (1..=det.nports).collect()
+            } else {
+                cfg.ports.clone()
+            };
+            let mut changed = false;
+            for p in 1..=det.nports {
+                let mut on = sel.contains(&p);
+                if ui.checkbox(&mut on, p.to_string()).changed() {
+                    changed = true;
+                    if on {
+                        sel.push(p);
+                    } else if sel.len() > 1 {
+                        sel.retain(|&q| q != p);
+                    }
+                }
+            }
+            if changed {
+                sel.sort_unstable();
+                cfg.ports = if sel.len() == det.nports { Vec::new() } else { sel };
+            }
+            if let Some(p) = plan {
+                ui.label(RichText::new(format!("→ .{} files", p.ts.ext())).strong());
+            }
+        });
+    }
+    let Some(plan) = plan else {
+        return;
+    };
+    let ts = &plan.ts;
+    let missing = ts.cols.iter().filter(|c| c.1.is_none()).count();
+    ui.horizontal(|ui| {
+        let text = if missing == 0 {
+            format!("{} parameters found ✔", ts.cols.len())
+        } else {
+            format!("{missing} of {} parameters missing (written as 0)", ts.cols.len())
+        };
+        ui.label(RichText::new(text).color(if missing == 0 { OK_GREEN } else { WARN }));
+        ui.toggle_value(&mut st.show_sparams, "Columns…");
+    });
+    if !st.show_sparams {
+        return;
+    }
+    if ts.cols.len() > 36 {
+        ui.label(RichText::new("Too many parameters to list: rename the columns S11db, S11deg… instead.").weak());
+        return;
+    }
+    let mut opts = vec![String::new()];
+    opts.extend(numeric.iter().cloned());
+    egui::Grid::new("dx_sparams")
+        .num_columns(3)
+        .spacing([10.0, 4.0])
+        .show(ui, |ui| {
+            for (name, db, deg) in &ts.cols {
+                ui.label(name);
+                for (what, found) in [("dB", db), ("deg", deg)] {
+                    let key = format!("{name} {what}");
+                    let current = cfg
+                        .sparam_overrides
+                        .iter()
+                        .find(|(k, _)| *k == key)
+                        .map(|(_, c)| c.clone())
+                        .unwrap_or_default();
+                    let shown = if current.is_empty() {
+                        found.map_or("— (not found)".to_owned(), |c| ds.columns[c].name.clone())
+                    } else {
+                        current.clone()
+                    };
+                    let mut chosen = current.clone();
+                    egui::ComboBox::from_id_salt(("dx_sp", &key))
+                        .selected_text(shown)
+                        .width(150.0)
+                        .height(300.0)
+                        .show_ui(ui, |ui| {
+                            for o in &opts {
+                                let label = if o.is_empty() { "auto (from the names)" } else { o };
+                                ui.selectable_value(&mut chosen, o.clone(), label);
+                            }
+                        });
+                    if chosen != current {
+                        cfg.sparam_overrides.retain(|(k, _)| *k != key);
+                        if !chosen.is_empty() {
+                            cfg.sparam_overrides.push((key, chosen));
+                        }
+                    }
+                }
+                ui.end_row();
+            }
+        });
 }

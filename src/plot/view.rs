@@ -61,6 +61,8 @@ pub struct PlotState {
     pub view: Option<[f64; 4]>,
     /// The legend is being dragged.
     dragging_legend: bool,
+    /// Legend entry under the pointer when its menu was opened (right-click).
+    legend_entry: Option<usize>,
     /// Left-drag draws a zoom rectangle (instead of panning).
     pub box_zoom: bool,
     /// View to apply at the next frame (zoom buttons, previous view…).
@@ -1013,35 +1015,101 @@ fn show_plot_impl(
         .on_hover_cursor(CursorIcon::Grab)
         .on_hover_text(
             "Drag to move the legend (drop it on an edge to place it outside the plot).\nClick an entry to show / hide \
-             the curve.\nRight-click: font and size.",
+             the curve.\nRight-click: rename the entry or the variables, font and size.",
         );
-    lresp.context_menu(|ui| {
-        ui.label(egui::RichText::new("Legend font").strong());
-        crate::ui::font_editor(
-            ui,
-            &format!("legend_menu_{}", cfg.id),
-            &mut cfg.layout.legend.font,
-            fonts,
-        );
-        ui.horizontal(|ui| {
-            ui.label("Size");
-            for size in [9.0, 11.0, 13.0, 16.0, 20.0] {
-                if ui
-                    .selectable_label(cfg.layout.legend.font.size == size, format!("{size:.0}"))
-                    .clicked()
-                {
-                    cfg.layout.legend.font.size = size;
+    if lresp.secondary_clicked() {
+        st.legend_entry = lresp
+            .interact_pointer_pos()
+            .and_then(|p| lm.entry_at(&grid, p.x - lrect.left(), p.y - lrect.top(), rows.len()));
+    }
+    // text fields in the menu: it stays open until a click outside (or Esc)
+    egui::Popup::context_menu(&lresp)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            // ---- the entry under the pointer ----
+            if let Some(row) = st.legend_entry.and_then(|i| rows.get(i)) {
+                let key = row.key.clone();
+                let auto = data
+                    .traces
+                    .iter()
+                    .find(|t| t.key == key)
+                    .map(|t| super::style::rename_variables(&t.label, &cfg.legend_names))
+                    .unwrap_or_default();
+                ui.label(egui::RichText::new("This entry").strong());
+                let o = cfg.overrides.entry(key.clone()).or_default();
+                ui.add(
+                    egui::TextEdit::singleline(&mut o.label)
+                        .hint_text(auto)
+                        .desired_width(260.0),
+                );
+                if o.is_default() {
+                    cfg.overrides.remove(&key);
+                }
+                ui.separator();
+            }
+            // ---- names of the variables (columns) shown in the legend ----
+            let mut vars: Vec<String> = Vec::new();
+            for v in cfg.ys.iter().chain(&cfg.series) {
+                if !vars.contains(v) {
+                    vars.push(v.clone());
                 }
             }
+            if !vars.is_empty() {
+                ui.label(egui::RichText::new("Variable names").strong())
+                    .on_hover_text("Name shown in every entry of the legend instead of the column name");
+                egui::Grid::new(("legend_vars", cfg.id)).num_columns(2).show(ui, |ui| {
+                    for v in &vars {
+                        ui.label(v);
+                        let mut name = cfg
+                            .legend_names
+                            .iter()
+                            .find(|(f, _)| f == v)
+                            .map(|(_, t)| t.clone())
+                            .unwrap_or_default();
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut name)
+                                    .hint_text(v.as_str())
+                                    .desired_width(170.0),
+                            )
+                            .changed()
+                        {
+                            cfg.legend_names.retain(|(f, _)| f != v);
+                            if !name.trim().is_empty() {
+                                cfg.legend_names.push((v.clone(), name));
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+                ui.separator();
+            }
+            ui.label(egui::RichText::new("Legend font").strong());
+            crate::ui::font_editor(
+                ui,
+                &format!("legend_menu_{}", cfg.id),
+                &mut cfg.layout.legend.font,
+                fonts,
+            );
+            ui.horizontal(|ui| {
+                ui.label("Size");
+                for size in [9.0, 11.0, 13.0, 16.0, 20.0] {
+                    if ui
+                        .selectable_label(cfg.layout.legend.font.size == size, format!("{size:.0}"))
+                        .clicked()
+                    {
+                        cfg.layout.legend.font.size = size;
+                    }
+                }
+            });
+            ui.separator();
+            ui.checkbox(&mut cfg.layout.legend.background, "Background");
+            ui.checkbox(&mut cfg.layout.legend.border, "Border");
+            if ui.button("Hide the legend").clicked() {
+                cfg.layout.legend.show = false;
+                ui.close();
+            }
         });
-        ui.separator();
-        ui.checkbox(&mut cfg.layout.legend.background, "Background");
-        ui.checkbox(&mut cfg.layout.legend.border, "Border");
-        if ui.button("Hide the legend").clicked() {
-            cfg.layout.legend.show = false;
-            ui.close();
-        }
-    });
     if lresp.drag_started() {
         let (fx, fy) = geom::to_free(fig_b, lb);
         cfg.layout.legend.position = LegendPos::Free { x: fx, y: fy };

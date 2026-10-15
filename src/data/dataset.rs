@@ -482,6 +482,8 @@ pub fn format_sig(v: f64, digits: usize) -> String {
 pub enum FileKind {
     Csv,
     Excel,
+    /// Touchstone file with this number of ports.
+    Touchstone(usize),
 }
 
 #[derive(Clone, Debug)]

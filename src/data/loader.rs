@@ -41,6 +41,12 @@ pub fn load_path(path: &Path, opts: &ImportOptions) -> Result<Dataset, String> {
         .unwrap_or_default();
     let mut ds = match ext.as_str() {
         "xlsx" | "xlsm" | "xlsb" | "xls" | "ods" => super::excel::load_excel(path, opts)?,
+        _ if super::touchstone::is_touchstone(path) => {
+            let bytes = std::fs::read(path).map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
+            let mut ds = super::touchstone::load(path, &bytes)?;
+            ds.info.file_bytes = bytes.len() as u64;
+            ds
+        }
         _ => {
             let bytes = std::fs::read(path).map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
             let mut ds = parse_csv(&bytes, opts)?;

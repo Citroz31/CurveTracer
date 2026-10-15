@@ -14,7 +14,7 @@ pub fn show(ui: &mut Ui) {
             ui.label("• The 🌙 / ☀ button left of QuickSave switches between the light and the dark theme.");
         });
         section(ui, "1. Load the data (File Select)", |ui| {
-            ui.label("• Open or drag & drop CSV / TXT / Excel files. Several sources can be loaded at the same time.");
+            ui.label("• Open or drag & drop CSV / TXT / Excel files or Touchstone files (.s1p, .s2p … .snp: columns Freq, S11db, S11deg, S21db…). Several sources can be loaded at the same time.");
             ui.label("• The delimiter and the header line are detected automatically; the metadata lines written above the column names are kept as “File information”.");
             ui.label("• ⚙ Options lets you force the delimiter, the header line, the decimal comma or the Excel sheet.");
             ui.label("• 🔌 De-embedding removes the input / output fixtures (cables, probes, test board) described by .s2p files:");
@@ -42,7 +42,7 @@ pub fn show(ui: &mut Ui) {
             ui.label("• Double-click: original scale · hover a curve: read its values.");
             ui.label("• Click on a curve: pin a marker showing x / y (click it again to remove it). Ctrl+Z / Ctrl+Y: undo / redo.");
             ui.label("• Plot list (left): click a card to show it, drag it to reorder, right-click to duplicate / move / delete (Del, Ctrl+D).");
-            ui.label("• The legend can be dragged with the mouse. Drop it on an edge of the graph to place it outside: the plot shrinks to make room. Click an entry to hide / show a curve; right-click it to change its font and size.");
+            ui.label("• The legend can be dragged with the mouse. Drop it on an edge of the graph to place it outside: the plot shrinks to make room. Click an entry to hide / show a curve; right-click it to rename the entry or the variables (column names shown in every entry), or change its font and size.");
             ui.label("• Copy / Split Plot (or right-click → Duplicate) numbers the copy: “Plot 3” → “Plot 4”.");
         });
         section(ui, "4. Layout & traces", |ui| {
@@ -57,6 +57,7 @@ pub fn show(ui: &mut Ui) {
         section(ui, "6. Export Plots", |ui| {
             ui.label("• Export Plots page: choose the plots and the slide titles, then Download PowerPoint (one 16:9 slide per plot), PNG or SVG images or the plot data as CSV.");
             ui.label("• The PowerPoint embeds vector (SVG) plots with a PNG copy; the PNG / SVG buttons of the Plots page save the current plot.");
+            ui.label("• The plots are shown with the proportions of the exported images and the exports keep the proportions of the screen (texts, legend).");
             ui.label("• Image size: 6 × 4.2 in (300 dpi) by default, placed at this size on the slides. Another format, or “Ask at each export”, opens the Image format window before each export.");
             ui.label("• Save the workspace (QuickSave / Ctrl+S) to find all the plots again later.");
         });
@@ -67,7 +68,7 @@ pub fn show(ui: &mut Ui) {
             ui.label("• A curve = the points with the same values of the curve columns (found automatically, editable), sorted by X: one .s2p file per curve.");
             ui.label("• Smoothing: a default method for every column, then Default / Custom / None column by column (e.g. LOESS on S11, spline on S21, no smoothing on the phases).");
             ui.label("    Each curve is smoothed on its whole range then cut to the band; phases are unwrapped first. Click a column to preview its smoothing.");
-            ui.label("• Formats: CSV (comma, semicolon or tab, decimal comma) · Touchstone DB / MA / RI, Hz…GHz, reference impedance. A summary file lists the settings.");
+            ui.label("• Formats: CSV (comma, semicolon or tab, decimal comma) · Touchstone .snp (DB / MA / RI, Hz…GHz, reference impedance): the number of ports comes from the S-parameter columns, uncheck ports to write a smaller network. A summary file lists the settings.");
         });
         ui.add_space(8.0);
         ui.label(RichText::new(format!("CurveTracer {}", env!("CARGO_PKG_VERSION"))).weak());

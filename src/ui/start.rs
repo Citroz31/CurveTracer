@@ -41,7 +41,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 super::logo(ui);
                 ui.add_space(16.0);
                 ui.label(
-                    RichText::new("Fast curves from your CSV / Excel measurement files").color(Color32::from_gray(200)),
+                    RichText::new("Fast curves from your CSV / Excel / Touchstone measurement files")
+                        .color(Color32::from_gray(200)),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).color(Color32::from_gray(170)));

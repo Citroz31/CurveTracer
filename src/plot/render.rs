@@ -36,14 +36,16 @@ impl RenderOptions {
         }
     }
 
-    /// Image of `w_in` × `h_in` inches at `dpi`: texts and lines keep the
-    /// sizes they have on the screen (96 dpi), as in a 6 × 4.2 in figure.
-    pub fn physical(w_in: f32, h_in: f32, dpi: f32) -> RenderOptions {
+    /// Image of `w_in` × `h_in` inches at `dpi`, looking like the plot shown
+    /// on the screen `screen_w` points wide: texts, legend, margins and
+    /// lines keep their proportions to the plot.
+    pub fn physical(w_in: f32, h_in: f32, dpi: f32, screen_w: f32) -> RenderOptions {
         let dpi = dpi.clamp(50.0, 1200.0);
+        let width = (w_in * dpi).round().clamp(64.0, 8000.0);
         RenderOptions {
-            width: (w_in * dpi).round().clamp(64.0, 8000.0) as u32,
+            width: width as u32,
             height: (h_in * dpi).round().clamp(64.0, 8000.0) as u32,
-            scale: dpi / 96.0,
+            scale: width / screen_w.max(100.0),
             view: None,
             dpi: Some(dpi),
         }
@@ -1129,7 +1131,7 @@ mod tests {
     fn png_output() {
         let (cfg, data, fonts) = plot();
         // 6 × 4.2 in at 300 dpi: 1800 × 1260 px, resolution in the PNG, inches in the SVG
-        let o = RenderOptions::physical(6.0, 4.2, 300.0);
+        let o = RenderOptions::physical(6.0, 4.2, 300.0, 576.0);
         assert_eq!((o.width, o.height), (1800, 1260));
         let png = render_png(&cfg, &data, &fonts, &o).unwrap();
         assert_eq!(&png[37..41], b"pHYs");

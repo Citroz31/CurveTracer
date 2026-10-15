@@ -60,7 +60,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     // miniatures of the exported images: same proportions and same relative
     // text / line sizes as the PNG / SVG / slide images
     let size = app.export.size;
-    let o = crate::plot::render::RenderOptions::physical(size.w_in, size.h_in, size.dpi as f32);
+    let o =
+        crate::plot::render::RenderOptions::physical(size.w_in, size.h_in, size.dpi as f32, app.screen_plot_width());
     let (ew, eh) = (o.width.max(1) as f32, o.height.max(1) as f32);
     let h = (w * eh / ew).clamp(w * 0.3, w * 1.5);
     let thumb_scale = w / (ew / o.scale);

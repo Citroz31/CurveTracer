@@ -173,8 +173,13 @@ impl ImageSize {
     }
 
     pub fn pixels(&self) -> (u32, u32) {
-        let o = RenderOptions::physical(self.w_in, self.h_in, self.dpi as f32);
+        let o = RenderOptions::physical(self.w_in, self.h_in, self.dpi as f32, 1000.0);
         (o.width, o.height)
+    }
+
+    /// Width / height (6 / 4.2 = 1.43 by default).
+    pub fn ratio(&self) -> f32 {
+        (self.w_in / self.h_in.max(0.1)).clamp(0.25, 4.0)
     }
 }
 
@@ -428,7 +433,7 @@ impl App {
             box_zoom: false,
             undo: Vec::new(),
             redo: Vec::new(),
-            plot_area: egui::vec2(700.0, 700.0),
+            plot_area: egui::vec2(0.0, 0.0),
             dirty_check: std::cell::Cell::new((f64::NEG_INFINITY, false)),
             import_defaults: ImportOptions::default(),
             data_page: DataPageState::default(),
@@ -623,7 +628,14 @@ impl App {
             .set_title("Open measurement files")
             .add_filter(
                 "Data files",
-                &["csv", "txt", "tsv", "dat", "xlsx", "xlsm", "xlsb", "xls", "ods"],
+                &[
+                    "csv", "txt", "tsv", "dat", "xlsx", "xlsm", "xlsb", "xls", "ods", "s1p", "s2p", "s3p", "s4p",
+                    "s5p", "s6p", "s8p", "s12p", "s16p",
+                ],
+            )
+            .add_filter(
+                "Touchstone (.snp)",
+                &["s1p", "s2p", "s3p", "s4p", "s5p", "s6p", "s8p", "s12p", "s16p"],
             )
             .add_filter("All files", &["*"]);
         if let Some(d) = &self.export.last_dir {
@@ -857,6 +869,12 @@ impl App {
                 .find(|c| c.kind == ColumnKind::Numeric && c.n_unique > 1)
             {
                 cfg.x = c.name.clone();
+            }
+            // Touchstone file: S21 (or S11) in dB
+            if matches!(ds.info.kind, crate::data::dataset::FileKind::Touchstone(_)) {
+                let y = ["S21db", "S11db"].into_iter().find(|n| ds.column(n).is_some());
+                cfg.ys = y.map(|n| vec![n.to_owned()]).unwrap_or_default();
+                cfg.name = format!("Plot {} – {}", self.plots.len() + 1, ds.name);
             }
         }
         // inherit the look of the previous plot
@@ -1341,9 +1359,19 @@ impl App {
 
     fn render_options(&self, view: Option<[f64; 4]>) -> RenderOptions {
         let s = self.export.size;
-        let mut o = RenderOptions::physical(s.w_in, s.h_in, s.dpi as f32);
+        let mut o = RenderOptions::physical(s.w_in, s.h_in, s.dpi as f32, self.screen_plot_width());
         o.view = view;
         o
+    }
+
+    /// Width of the plots on the screen (points): the exported images look
+    /// the same (texts, legend and lines keep their proportions).
+    pub fn screen_plot_width(&self) -> f32 {
+        if self.plot_area.x >= 200.0 {
+            self.plot_area.x
+        } else {
+            860.0
+        }
     }
 
     /// Exports images (PowerPoint, PNG / SVG): directly in the 6 : 4.2

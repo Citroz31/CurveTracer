@@ -313,7 +313,7 @@ fn preview_dropped_files(ctx: &egui::Context) {
     painter.text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
-        "Drop CSV / Excel files (or a .ctw workspace) to load them",
+        "Drop CSV / Excel / Touchstone files (or a .ctw workspace) to load them",
         egui::FontId::proportional(24.0),
         Color32::WHITE,
     );

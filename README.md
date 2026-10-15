@@ -135,6 +135,10 @@ crochets (`[VDD Supply Current [A]]`) ou directement s'ils sont simples (`S21db`
 ![Export](docs/screenshots/export.png)
 ![Diapositive](docs/screenshots/slide-1.png)
 
+### Fichiers Touchstone
+- Chargement des `.s1p` … `.snp` comme sources de données (colonnes Freq, S11db, S11deg, S21db…).
+- Export `.snp` depuis la page *Export Data* : nombre de ports détecté, ports écrits au choix.
+
 ### Export des données (page *Export Data*)
 - Données **après de-embedding** (ou brutes) en **CSV** (virgule, point-virgule, tabulation, virgule décimale)
   et / ou **Touchstone `.s2p`** (DB / MA / RI, Hz … GHz, impédance de référence) — un `.s2p` par courbe.

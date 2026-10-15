@@ -4,6 +4,7 @@ pub mod excel;
 pub mod expr;
 pub mod hash;
 pub mod loader;
+pub mod touchstone;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

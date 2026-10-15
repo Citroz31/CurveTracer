@@ -1,6 +1,6 @@
 //! "Export Data" page: chosen columns of a data source (after the
 //! de-embedding and the user functions), optionally smoothed column by
-//! column, written as CSV and / or Touchstone (.s2p) files, sorted into
+//! column, written as CSV and / or Touchstone (.snp) files, sorted into
 //! folders / files by the values of chosen columns (SN, temperature…).
 //!
 //! Pipeline: filters → curves (the points sharing the same values of the
@@ -15,8 +15,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use serde::{Deserialize, Serialize};
 
 use crate::data::dataset::{Column, Dataset, format_sig};
-use crate::data::deembed::{FreqUnit, find_sparam_columns};
+use crate::data::deembed::FreqUnit;
 use crate::data::hash::{FxHashMap, hash_one};
+use crate::data::touchstone::{self, detect_sparams};
 use crate::plot::compute::filter_rows;
 use crate::plot::config::FilterConfig;
 use crate::plot::smooth::{SmoothConfig, SmoothMethod};
@@ -149,10 +150,82 @@ impl TsFormat {
     }
 }
 
-/// Names of the 8 S-parameter columns, in the Touchstone order.
-pub const SPARAM_NAMES: [&str; 8] = [
-    "S11 dB", "S11 deg", "S21 dB", "S21 deg", "S12 dB", "S12 deg", "S22 dB", "S22 deg",
-];
+/// "S21" (ports numbered from 1; "S1_10" above 9 ports).
+pub fn sparam_name(i: usize, j: usize, nports: usize) -> String {
+    if nports > 9 {
+        format!("S{i}_{j}")
+    } else {
+        format!("S{i}{j}")
+    }
+}
+
+/// Touchstone columns of an export: ports written and, for every S(a, b)
+/// of the written file (row-major), the dB and phase columns.
+#[derive(Clone, Debug, Default)]
+pub struct TsColumns {
+    /// Number of ports found in the data.
+    pub detected: usize,
+    /// Ports of the data written (in this order: port 1, 2… of the files).
+    pub ports: Vec<usize>,
+    /// (name in the data numbering, dB column, phase column), `ports.len()²` entries.
+    pub cols: Vec<(String, Option<usize>, Option<usize>)>,
+}
+
+impl TsColumns {
+    pub fn n(&self) -> usize {
+        self.ports.len()
+    }
+
+    /// Columns used (dB and phase).
+    pub fn columns(&self) -> impl Iterator<Item = usize> + '_ {
+        self.cols.iter().flat_map(|c| [c.1, c.2]).flatten()
+    }
+
+    /// File extension: s1p, s2p, s4p…
+    pub fn ext(&self) -> String {
+        format!("s{}p", self.n().max(1))
+    }
+}
+
+/// Ports and columns of the Touchstone files for these settings.
+pub fn touchstone_columns(ds: &Dataset, cfg: &DataExportConfig) -> TsColumns {
+    let det = detect_sparams(ds);
+    let mut ports: Vec<usize> = if cfg.ports.is_empty() {
+        (1..=det.nports).collect()
+    } else {
+        cfg.ports
+            .iter()
+            .copied()
+            .filter(|&p| p >= 1 && p <= det.nports)
+            .collect()
+    };
+    ports.sort_unstable();
+    ports.dedup();
+    if ports.is_empty() {
+        ports = (1..=det.nports).collect();
+    }
+    let over = |key: &str| -> Option<Option<usize>> {
+        cfg.sparam_overrides
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, c)| ds.column_index(c))
+    };
+    let mut cols = Vec::with_capacity(ports.len() * ports.len());
+    for &a in &ports {
+        for &b in &ports {
+            let name = sparam_name(a, b, det.nports);
+            let (db, deg) = det.get(a, b);
+            let db = over(&format!("{name} dB")).unwrap_or(db);
+            let deg = over(&format!("{name} deg")).unwrap_or(deg);
+            cols.push((name, db, deg));
+        }
+    }
+    TsColumns {
+        detected: det.nports,
+        ports,
+        cols,
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -189,11 +262,14 @@ pub struct DataExportConfig {
     pub ts_format: TsFormat,
     /// Unit of the X (frequency) column of the data.
     pub freq_unit: FreqUnit,
-    /// Frequency unit of the .s2p files.
+    /// Frequency unit of the Touchstone files.
     pub ts_unit: FreqUnit,
     pub r_ref: f64,
-    /// S11 dB, S11 deg, S21 dB… columns (empty = found from the names).
-    pub sparams: [String; 8],
+    /// Ports of the data written in the Touchstone files (empty = all).
+    pub ports: Vec<usize>,
+    /// Columns chosen by hand: ("S21 dB", column); the others are found
+    /// from their names.
+    pub sparam_overrides: Vec<(String, String)>,
     pub folder: Option<PathBuf>,
     /// Beginning of the file names.
     pub prefix: String,
@@ -225,7 +301,8 @@ impl Default for DataExportConfig {
             freq_unit: FreqUnit::Auto,
             ts_unit: FreqUnit::GHz,
             r_ref: 50.0,
-            sparams: Default::default(),
+            ports: Vec::new(),
+            sparam_overrides: Vec::new(),
             folder: None,
             prefix: String::new(),
         }
@@ -359,9 +436,9 @@ pub struct Plan {
     pub auto_found: Vec<usize>,
     pub curves: Vec<Curve>,
     pub groups: Vec<Group>,
-    /// Relative path of the .s2p file of every curve.
-    pub s2p: Vec<PathBuf>,
-    pub sparams: [Option<usize>; 8],
+    /// Relative path of the Touchstone file of every curve.
+    pub snp: Vec<PathBuf>,
+    pub ts: TsColumns,
     /// Rows kept by the filters.
     pub n_rows: usize,
     /// Points in the X band.
@@ -673,7 +750,9 @@ pub fn build_plan(ds: &Dataset, cfg: &DataExportConfig) -> Result<Plan, String> 
         (dir, stem)
     };
     let mut groups: Vec<Group> = Vec::new();
-    let mut s2p: Vec<PathBuf> = Vec::with_capacity(curves.len());
+    let ts = touchstone_columns(ds, cfg);
+    let ext = ts.ext();
+    let mut snp: Vec<PathBuf> = Vec::with_capacity(curves.len());
     for (i, c) in curves.iter().enumerate() {
         let new_group = match groups.last() {
             Some(g) => curves[g.curves.start].keys[..n_split] != c.keys[..n_split],
@@ -695,25 +774,14 @@ pub fn build_plan(ds: &Dataset, cfg: &DataExportConfig) -> Result<Plan, String> 
             name.push('_');
             name.push_str(&name_part(&ds.columns[kc], key, cfg.with_names));
         }
-        s2p.push(dir.join(format!("{name}.s2p")));
+        snp.push(dir.join(format!("{name}.{ext}")));
     }
     let mut csv_paths: Vec<PathBuf> = groups.iter().map(|g| g.csv.clone()).collect();
     dedupe(&mut csv_paths);
     for (g, p) in groups.iter_mut().zip(csv_paths) {
         g.csv = p;
     }
-    dedupe(&mut s2p);
-
-    // ---- S-parameter columns ---------------------------------------------
-    let (db, deg) = find_sparam_columns(ds);
-    let sparams: [Option<usize>; 8] = std::array::from_fn(|k| {
-        let name = &cfg.sparams[k];
-        if name.is_empty() {
-            if k % 2 == 0 { db[k / 2] } else { deg[k / 2] }
-        } else {
-            ds.column_index(name)
-        }
-    });
+    dedupe(&mut snp);
     Ok(Plan {
         key,
         x,
@@ -723,8 +791,8 @@ pub fn build_plan(ds: &Dataset, cfg: &DataExportConfig) -> Result<Plan, String> 
         auto_found,
         curves,
         groups,
-        s2p,
-        sparams,
+        snp,
+        ts,
         n_rows,
         n_points,
         duplicates: dup_count.into_inner(),
@@ -974,8 +1042,8 @@ fn csv_rows(ds: &Dataset, plan: &Plan, cfg: &DataExportConfig, cv: &CurveValues,
     }
 }
 
-/// Text of the .s2p file of a curve; `notes` receives what the user should know.
-fn s2p_text(
+/// Text of the Touchstone file of a curve; `notes` receives what the user should know.
+fn snp_text(
     ds: &Dataset,
     plan: &Plan,
     cfg: &DataExportConfig,
@@ -985,6 +1053,8 @@ fn s2p_text(
     notes: &mut BTreeSet<String>,
 ) -> String {
     use std::fmt::Write as _;
+    let ts = &plan.ts;
+    let n = ts.n();
     let xc = &ds.columns[plan.x];
     let f_mult = cfg.data_unit(xc).mult() / cfg.out_unit().mult();
     let unit = cfg.out_unit().label().to_uppercase();
@@ -998,26 +1068,33 @@ fn s2p_text(
         let _ = writeln!(t, "! {line}");
     }
     let _ = writeln!(t, "! Curve: {}", plan.curve_label(ds, curve));
+    if ts.ports.len() < ts.detected || ts.ports.iter().enumerate().any(|(k, &p)| p != k + 1) {
+        let list: Vec<String> = ts.ports.iter().map(|p| p.to_string()).collect();
+        let _ = writeln!(
+            t,
+            "! Ports {} of the data ({} ports) written as ports 1 … {n}",
+            list.join(", "),
+            ts.detected
+        );
+    }
     let mut smooth = Vec::new();
-    for (k, c) in plan.sparams.iter().enumerate() {
-        if let Some(c) = *c {
-            let name = &ds.columns[c].name;
-            if let Some(sm) = cfg.smoothing_for(name) {
-                smooth.push(format!("{} ({name}): {}", SPARAM_NAMES[k], sm.describe()));
+    for (name, db, deg) in &ts.cols {
+        for (c, what) in [(db, "dB"), (deg, "deg")] {
+            if let Some(c) = *c {
+                let col = &ds.columns[c].name;
+                if let Some(sm) = cfg.smoothing_for(col) {
+                    smooth.push(format!("{name} {what} ({col}): {}", sm.describe()));
+                }
             }
         }
     }
     if !smooth.is_empty() {
         let _ = writeln!(t, "! Smoothing: {}", smooth.join("; "));
     }
-    for p in 0..4 {
-        let name = &SPARAM_NAMES[2 * p][..3];
-        match (plan.sparams[2 * p], plan.sparams[2 * p + 1]) {
+    for (name, db, deg) in &ts.cols {
+        match (db, deg) {
             (None, _) => {
-                let _ = writeln!(
-                    t,
-                    "! {name}: not in the data, written as 0 (no transmission / reflection)"
-                );
+                let _ = writeln!(t, "! {name}: not in the data, written as 0");
                 notes.insert(format!("{name} is not in the data: written as 0"));
             }
             (Some(_), None) => {
@@ -1028,43 +1105,50 @@ fn s2p_text(
         }
     }
     let _ = writeln!(t, "# {unit} S {} R {}", cfg.ts_format.code(), format_sig(cfg.r_ref, 10));
-    let (a, b) = match cfg.ts_format {
-        TsFormat::Db => ("dB", "ang"),
-        TsFormat::Ma => ("mag", "ang"),
-        TsFormat::Ri => ("re", "im"),
+    let order: Vec<&str> = if n == 2 {
+        [0, 2, 1, 3].iter().map(|&k| ts.cols[k].0.as_str()).collect()
+    } else {
+        ts.cols.iter().map(|c| c.0.as_str()).collect()
     };
     let _ = writeln!(
         t,
-        "! freq[{}] S11{a} S11{b} S21{a} S21{b} S12{a} S12{b} S22{a} S22{b}",
-        cfg.out_unit().label()
+        "! freq[{}] {}{}",
+        cfg.out_unit().label(),
+        order.join(" "),
+        if n > 2 { " (one matrix row per line)" } else { "" }
     );
     // points (equal frequencies averaged, incomplete points skipped)
-    let mut pts: Vec<(f64, [f64; 8], usize)> = Vec::with_capacity(cv.rows.len());
+    let m = ts.cols.len();
+    // (frequency, (dB, deg) of every parameter, number of points averaged)
+    type Point = (f64, Vec<(f64, f64)>, usize);
+    let mut pts: Vec<Point> = Vec::with_capacity(cv.rows.len());
     let mut skipped = 0;
     for k in 0..cv.rows.len() {
         let f = xc.value(cv.rows[k] as usize);
-        let mut v = [0.0f64; 8];
         let mut ok = f.is_finite();
-        for (j, c) in plan.sparams.iter().enumerate() {
-            v[j] = match *c {
-                Some(c) => cv.value(ds, c, k),
-                None if j % 2 == 0 => f64::NEG_INFINITY,
-                None => 0.0,
-            };
-            if c.is_some() && !v[j].is_finite() {
-                ok = false;
-            }
-        }
+        let v: Vec<(f64, f64)> = ts
+            .cols
+            .iter()
+            .map(|(_, db, deg)| {
+                let a = db.map_or(f64::NEG_INFINITY, |c| cv.value(ds, c, k));
+                let b = deg.map_or(0.0, |c| cv.value(ds, c, k));
+                if (db.is_some() && !a.is_finite()) || !b.is_finite() {
+                    ok = false;
+                }
+                (a, b)
+            })
+            .collect();
         if !ok {
             skipped += 1;
             continue;
         }
         match pts.last_mut() {
-            Some((pf, acc, n)) if *pf == f => {
-                for j in 0..8 {
-                    acc[j] += v[j];
+            Some((pf, acc, cnt)) if *pf == f => {
+                for (s, x) in acc.iter_mut().zip(&v) {
+                    s.0 += x.0;
+                    s.1 += x.1;
                 }
-                *n += 1;
+                *cnt += 1;
             }
             _ => pts.push((f, v, 1)),
         }
@@ -1077,23 +1161,17 @@ fn s2p_text(
             "Repeated frequencies inside a curve were averaged: add a column to the curve definition".to_owned(),
         );
     }
-    for (f, acc, n) in pts {
-        let v: [f64; 8] = std::array::from_fn(|j| acc[j] / n as f64);
-        let _ = write!(t, "{}", format_sig(f * f_mult, 12));
-        for p in 0..4 {
-            let (db, deg) = (v[2 * p], v[2 * p + 1]);
-            let mag = if db.is_finite() { 10f64.powf(db / 20.0) } else { 0.0 };
-            let (u, w) = match cfg.ts_format {
-                TsFormat::Db => (if db.is_finite() { db } else { -200.0 }, deg),
-                TsFormat::Ma => (mag, deg),
-                TsFormat::Ri => {
-                    let a = deg.to_radians();
-                    (mag * a.cos(), mag * a.sin())
-                }
-            };
-            let _ = write!(t, " {} {}", format_sig(u, 9), format_sig(w, 9));
+    let format = match cfg.ts_format {
+        TsFormat::Db => touchstone::Format::Db,
+        TsFormat::Ma => touchstone::Format::Ma,
+        TsFormat::Ri => touchstone::Format::Ri,
+    };
+    let mut vals = vec![(0.0, 0.0); m];
+    for (f, acc, cnt) in pts {
+        for (v, a) in vals.iter_mut().zip(&acc) {
+            *v = (a.0 / cnt as f64, a.1 / cnt as f64);
         }
-        t.push('\n');
+        touchstone::write_point(&mut t, f * f_mult, &vals, n, format);
     }
     t
 }
@@ -1104,7 +1182,7 @@ fn s2p_text(
 
 pub struct ExportSummary {
     pub csv_files: usize,
-    pub s2p_files: usize,
+    pub snp_files: usize,
     pub points: usize,
     pub ms: f64,
     pub notes: Vec<String>,
@@ -1134,7 +1212,7 @@ pub fn run(
 ) -> Result<ExportSummary, String> {
     let t0 = std::time::Instant::now();
     if !cfg.csv && !cfg.s2p {
-        return Err("Choose a format: CSV and / or Touchstone (.s2p)".to_owned());
+        return Err("Choose a format: CSV and / or Touchstone (.snp)".to_owned());
     }
     // the plan of the page, if it matches these settings
     let plan = match plan.filter(|p| p.key == cfg.plan_key(ds.generation)) {
@@ -1148,7 +1226,7 @@ pub fn run(
     if cfg.csv && plan.columns.is_empty() {
         return Err("Choose the columns to export".to_owned());
     }
-    if cfg.s2p && plan.sparams.iter().step_by(2).all(|c| c.is_none()) {
+    if cfg.s2p && plan.ts.cols.iter().all(|c| c.1.is_none()) {
         return Err("No S-parameter column found (S11db, S21db…): choose them in the Touchstone settings".to_owned());
     }
     progress.total.store(plan.curves.len(), Ordering::Relaxed);
@@ -1162,9 +1240,9 @@ pub fn run(
     }
     let mut needed: Vec<usize> = if cfg.csv { plan.columns.clone() } else { Vec::new() };
     if cfg.s2p {
-        for c in plan.sparams.iter().flatten() {
-            if !needed.contains(c) {
-                needed.push(*c);
+        for c in plan.ts.columns() {
+            if !needed.contains(&c) {
+                needed.push(c);
             }
         }
     }
@@ -1180,7 +1258,7 @@ pub fn run(
             return Err("Export cancelled".to_owned());
         }
         let end = (start + batch).min(plan.curves.len());
-        // curves of the batch in parallel: CSV text (kept in order) and .s2p files
+        // curves of the batch in parallel: CSV text (kept in order) and Touchstone files
         let next = AtomicUsize::new(start);
         let results: Vec<Vec<(usize, Result<String, String>)>> = std::thread::scope(|s| {
             let handles: Vec<_> = (0..threads.min(end - start))
@@ -1197,8 +1275,8 @@ pub fn run(
                             let mut res = Ok(String::new());
                             if cfg.s2p {
                                 let mut n = BTreeSet::new();
-                                let text = s2p_text(ds, plan, cfg, i, &cv, info, &mut n);
-                                if let Err(e) = write_file(&dir.join(&plan.s2p[i]), text.as_bytes()) {
+                                let text = snp_text(ds, plan, cfg, i, &cv, info, &mut n);
+                                if let Err(e) = write_file(&dir.join(&plan.snp[i]), text.as_bytes()) {
                                     res = Err(e);
                                 }
                                 if !n.is_empty() {
@@ -1259,7 +1337,7 @@ pub fn run(
     )?;
     Ok(ExportSummary {
         csv_files,
-        s2p_files: if cfg.s2p { plan.curves.len() } else { 0 },
+        snp_files: if cfg.s2p { plan.curves.len() } else { 0 },
         points: plan.n_points,
         ms: t0.elapsed().as_secs_f64() * 1000.0,
         notes: notes
@@ -1303,16 +1381,19 @@ pub fn describe(ds: &Dataset, plan: &Plan, cfg: &DataExportConfig, info: &[Strin
     let _ = writeln!(t, "Files sorted by: {}", names(&plan.key_cols[..plan.n_split]));
     let _ = writeln!(
         t,
-        "{} curve(s), {} point(s), {} CSV file(s), {} .s2p file(s)",
+        "{} curve(s), {} point(s), {} CSV file(s), {} .{} file(s)",
         plan.curves.len(),
         plan.n_points,
         if cfg.csv { plan.groups.len() } else { 0 },
-        if cfg.s2p { plan.curves.len() } else { 0 }
+        if cfg.s2p { plan.curves.len() } else { 0 },
+        plan.ts.ext()
     );
     let mut cols = plan.columns.clone();
-    for c in plan.sparams.iter().flatten() {
-        if !cols.contains(c) {
-            cols.push(*c);
+    if cfg.s2p {
+        for c in plan.ts.columns() {
+            if !cols.contains(&c) {
+                cols.push(c);
+            }
         }
     }
     let _ = writeln!(t, "Smoothing:");
@@ -1439,7 +1520,7 @@ mod tests {
         // 32, 32.5 … 34 GHz
         assert!(plan.curves.iter().all(|c| c.in_band == 5));
         assert_eq!(plan.n_points, 4 * 5);
-        let s = plan.s2p[0].to_string_lossy().replace('\\', "/");
+        let s = plan.snp[0].to_string_lossy().replace('\\', "/");
         assert_eq!(s, "SN_A1/CGY_Temp_-40.s2p");
     }
 
@@ -1456,11 +1537,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ct_export_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let summary = run(&ds, &c, &dir, &["Source: test".into()], &Progress::default(), None).unwrap();
-        assert_eq!(summary.s2p_files, 6);
+        assert_eq!(summary.snp_files, 6);
         assert_eq!(summary.csv_files, 3);
         assert!(summary.notes.iter().any(|n| n.starts_with("S12")));
         let plan = build_plan(&ds, &c).unwrap();
-        let text = std::fs::read_to_string(dir.join(&plan.s2p[0])).unwrap();
+        let text = std::fs::read_to_string(dir.join(&plan.snp[0])).unwrap();
         let ts = Touchstone::parse(&text, "x").unwrap();
         assert_eq!(ts.freq.len(), 21);
         assert!((ts.freq[0] - 30e9).abs() < 1.0);
@@ -1472,6 +1553,67 @@ mod tests {
         let csv = std::fs::read_to_string(dir.join(&plan.groups[0].csv)).unwrap();
         assert_eq!(csv.lines().count(), 1 + 42);
         assert!(csv.starts_with("SN,Temp,Freq,S21db,S21deg\n"), "{}", &csv[..60]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn four_port_restricted_to_two() {
+        use crate::data::deembed::C;
+        // 4-port network, 5 frequencies: S(i, j) = (10 i + j) / 100 at 10·f degrees
+        let n = 4;
+        let freq: Vec<f64> = (1..=5).map(|k| k as f64 * 1e9).collect();
+        let s = freq
+            .iter()
+            .map(|f| {
+                (0..n * n)
+                    .map(|k| {
+                        let m = (10 * (k / n + 1) + k % n + 1) as f64 / 100.0;
+                        let a = (10.0 * f / 1e9).to_radians();
+                        C::new(m * a.cos(), m * a.sin())
+                    })
+                    .collect()
+            })
+            .collect();
+        let net = touchstone::Network {
+            nports: n,
+            freq,
+            s,
+            r_ref: 50.0,
+            format: "MA".into(),
+            comments: Vec::new(),
+        };
+        let mut ds = touchstone::to_dataset(&net);
+        ds.name = "dut.s4p".into();
+        let mut c = DataExportConfig {
+            x: "Freq".into(),
+            csv: false,
+            s2p: true,
+            ..Default::default()
+        };
+        let plan = build_plan(&ds, &c).unwrap();
+        assert_eq!(plan.ts.detected, 4);
+        assert_eq!(plan.snp[0].to_string_lossy(), "dut.s4p");
+        // ports 2 and 4 only: a .s2p whose S21 is the S42 of the data
+        c.ports = vec![4, 2];
+        let plan = build_plan(&ds, &c).unwrap();
+        assert_eq!(plan.ts.ports, vec![2, 4]);
+        assert_eq!(plan.snp[0].to_string_lossy(), "dut.s2p");
+        let dir = std::env::temp_dir().join(format!("ct_export_snp_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        run(&ds, &c, &dir, &[], &Progress::default(), None).unwrap();
+        let text = std::fs::read_to_string(dir.join("dut.s2p")).unwrap();
+        assert!(text.contains("! Ports 2, 4 of the data (4 ports) written as ports 1 … 2"));
+        let back = touchstone::parse(&text, Some(2)).unwrap();
+        assert_eq!(back.freq.len(), 5);
+        let s21 = back.s[2][2]; // row 2, column 1 = S42 of the data
+        assert!((s21.abs() - 0.42).abs() < 1e-6, "{}", s21.abs());
+        assert!((s21.deg() - 30.0).abs() < 1e-5);
+        // the whole 4-port written back
+        c.ports.clear();
+        run(&ds, &c, &dir, &[], &Progress::default(), None).unwrap();
+        let text = std::fs::read_to_string(dir.join("dut.s4p")).unwrap();
+        let back = touchstone::parse(&text, Some(4)).unwrap();
+        assert!((back.s[4][4 * 2 + 3].abs() - 0.34).abs() < 1e-6);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1571,7 +1713,7 @@ mod tests {
                 "export smooth={smooth} s2p={s2p}: {:.2} s ({} csv, {} s2p, {} points)",
                 t.elapsed().as_secs_f64(),
                 s.csv_files,
-                s.s2p_files,
+                s.snp_files,
                 s.points
             );
         }

@@ -699,6 +699,9 @@ pub struct PlotConfig {
     pub options: PlotOptions,
     pub traces: TraceDefaults,
     pub overrides: BTreeMap<String, TraceOverride>,
+    /// Names shown in the legend instead of the column names:
+    /// ("Set_TempC", "Temperature").
+    pub legend_names: Vec<(String, String)>,
     pub markers: Vec<DataMarker>,
     /// Title of the slide in the PowerPoint export (empty = plot title/name).
     pub slide_title: String,
@@ -722,6 +725,7 @@ impl Default for PlotConfig {
             options: PlotOptions::default(),
             traces: TraceDefaults::default(),
             overrides: BTreeMap::new(),
+            legend_names: Vec::new(),
             markers: Vec::new(),
             slide_title: String::new(),
             export: true,

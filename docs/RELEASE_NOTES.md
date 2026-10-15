@@ -12,6 +12,19 @@
 > Les étapes pour supprimer définitivement cet avertissement (signature de code) sont décrites dans `docs/SIGNATURE_WINDOWS.md`.
 > `SHA256SUMS.txt` donne l'empreinte de chaque fichier (vérification, liste blanche du service informatique).
 
+## Nouveautés de la version 0.5.0
+
+- **Chargement des fichiers Touchstone** `.s1p` … `.snp` (versions 1 et 2, DB / MA / RI) : colonnes Freq, S11db,
+  S11deg, S12db… ; un nouveau graphe affiche directement S21 ; de-embedding et export comme pour un CSV.
+- **Export Data en `.snp`** : nombre de ports déterminé à partir des colonnes S-paramètres, cases pour restreindre
+  les ports écrits (réseau renuméroté, extension `.s1p` … `.snp` adaptée), choix de la colonne de chaque paramètre.
+- **Graphe au format 6 : 4,2** dans la page Plots, agrandi à toute la place disponible : l'écran montre l'image
+  exportée.
+- **Exports à l'échelle de l'écran** : textes, légende et traits des PNG / SVG / PowerPoint ont les proportions du
+  graphe affiché (la légende n'est plus trop grosse en SVG).
+- **Clic droit sur la légende** : renommer l'entrée cliquée et les **variables** (colonnes Y et séries) dans toutes
+  les entrées, en plus de la police et de la taille.
+
 ## Nouveautés de la version 0.4.1
 
 - **Images au format 6 × 4,2 in** (300 dpi, 1800 × 1260 px) pour les PNG, SVG et le PowerPoint : résolution écrite

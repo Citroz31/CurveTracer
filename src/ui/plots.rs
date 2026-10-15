@@ -145,12 +145,11 @@ fn strip(app: &mut App, ui: &mut Ui) {
 
     let fonts = Arc::clone(&app.fonts);
     let w = ui.available_width();
-    // miniatures with the proportions of the real plot area, scaled down
-    let area = app.plot_area;
-    let aspect = (area.y / area.x.max(1.0)).clamp(0.35, 1.6);
+    // miniatures with the proportions of the real plot (6 : 4.2), scaled down
+    let aspect = 1.0 / app.export.size.ratio();
     let thumb_w = w - 8.0;
     let thumb_h = (thumb_w * aspect).round();
-    let scale = thumb_w / area.x.max(1.0);
+    let scale = thumb_w / app.screen_plot_width();
     let row_h = thumb_h + 30.0;
     let n = app.plots.len();
     // keep the current plot visible when it changes (wheel, keyboard)
@@ -594,7 +593,19 @@ fn navigator(app: &mut App, ui: &mut Ui) {
     let last = (pos.ceil().max(0.0) as usize).min(n - 1);
     let fonts = Arc::clone(&app.fonts);
     let box_zoom = app.box_zoom;
-    app.plot_area = area.size();
+    // the plot has the proportions of the exported images (6 : 4.2), as big
+    // as the space allows
+    let fit = |r: Rect| -> Rect {
+        let ratio = app.export.size.ratio();
+        let r = r.shrink(6.0);
+        let (w, h) = if r.width() / r.height().max(1.0) > ratio {
+            (r.height() * ratio, r.height())
+        } else {
+            (r.width(), r.width() / ratio)
+        };
+        Rect::from_center_size(r.center(), Vec2::new(w, h))
+    };
+    app.plot_area = fit(area).size();
     let mut marker_changes = Vec::new();
     ui.scope_builder(UiBuilder::new().max_rect(area), |ui| {
         ui.set_clip_rect(area);
@@ -606,7 +617,14 @@ fn navigator(app: &mut App, ui: &mut Ui) {
             let p = &mut app.plots[k];
             p.state.box_zoom = box_zoom;
             let before = p.cfg.markers.clone();
-            show_plot(ui, r, &mut p.cfg, &mut p.state, &fonts, true);
+            let fr = fit(r);
+            // the page around the image
+            ui.painter().rect_filled(
+                fr.translate(Vec2::new(2.0, 3.0)).expand(1.0),
+                3.0,
+                Color32::from_black_alpha(40),
+            );
+            show_plot(ui, fr, &mut p.cfg, &mut p.state, &fonts, true);
             if p.cfg.markers != before {
                 marker_changes.push((p.cfg.id, before));
             }
