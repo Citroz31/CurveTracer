@@ -1,6 +1,6 @@
 ---
 title: "CurveTracer — Guide utilisateur"
-subtitle: "Version 0.3.5"
+subtitle: "Version 0.4.0"
 ---
 
 # 1. Présentation
@@ -12,7 +12,14 @@ de façon rapide et interactive. Le principe :
 2. on **ajoute les graphes un par un** (page *Plots*) en choisissant X, Y, des
    filtres et des séries ;
 3. on règle la **mise en page** (titres, polices, graduations, légende…) ;
-4. on **exporte** en PowerPoint, en images PNG / SVG ou en CSV (page *Export*).
+4. on **exporte** les graphes en PowerPoint, en images PNG / SVG ou en CSV
+   (page *Export Plots*), et les **données** elles-mêmes en CSV ou en
+   Touchstone `.s2p`, lissées ou non (page *Export Data*).
+
+Nouveautés de la version 0.4.0 : page **Export Data** (§ 9) — export des
+données de son choix (après de-embedding) en **CSV** et / ou **`.s2p`**, sur
+une bande de fréquence et selon des critères, **rangées en dossiers / fichiers**
+par SN, température… avec un **lissage réglable colonne par colonne**.
 
 Nouveautés de la version 0.3.0 :
 
@@ -42,7 +49,8 @@ droite de la fenêtre :
 | **Data** | consulter le contenu brut d'un fichier |
 | **Functions** | créer des colonnes calculées (formules) |
 | **Plots** | créer et régler les graphes |
-| **Export** | exporter en PowerPoint / PNG / SVG / CSV |
+| **Export Plots** | exporter les graphes en PowerPoint / PNG / SVG / CSV |
+| **Export Data** | exporter les données en CSV / Touchstone `.s2p` (lissées ou non) |
 | **Help** | aide-mémoire intégré |
 
 La barre du haut contient le menu **File** (ouvrir des fichiers, charger une
@@ -471,7 +479,7 @@ Exemples :
 | NF + Input Loss | `[NF] + 0.8` |
 | DC power (W) | `[VDD Supply Voltage [V]] * [VDD Supply Current [A]]` |
 
-# 8. Exporter (page *Export*)
+# 8. Exporter les graphes (page *Export Plots*)
 
 ![Page Export](screenshots/export.png)
 
@@ -497,7 +505,111 @@ Exemples :
 
 ![Diapositive générée](screenshots/slide-1.png)
 
-# 9. Espaces de travail
+# 9. Exporter des données (page *Export Data*)
+
+![Page Export Data : données, sélection, rangement des fichiers et aperçu](screenshots/export_data.png)
+
+Cette page écrit les **données elles-mêmes** (pas les graphes) dans des
+fichiers **CSV** et / ou **Touchstone `.s2p`**, avec le **de-embedding**
+éventuel déjà appliqué et un **lissage** facultatif. Elle se règle de haut en
+bas ; l'aperçu à droite se met à jour à chaque changement : nombre de lignes,
+de courbes et de points retenus, **arborescence des fichiers** qui seront
+écrits et **aperçu d'une courbe** (données brutes en gris, valeurs exportées en
+rouge, limites de la bande en bleu).
+
+**1 · Data**
+
+- **Data source** : le fichier à exporter.
+- **De-embedding** : si un de-embedding est actif sur ce fichier (§ 3.1), les
+  valeurs exportées sont les valeurs **corrigées**. Cocher *Export the raw data
+  instead* pour exporter les valeurs brutes.
+- **X (frequency…)** : la colonne X, en général la fréquence (choisie
+  automatiquement).
+- **Columns to export** : les colonnes écrites dans les CSV. Boutons
+  *S-parameters* (S11 … S22 en dB et en phase), *All numbers*, *None*, et
+  recherche par nom.
+
+**2 · Selection (band, criteria)**
+
+- **X band** : bande à exporter, par exemple *from 40 to 65 GHz* (pour une
+  fréquence, les valeurs sont saisies en GHz ou dans l'unité choisie pour les
+  `.s2p`). Seuls les points de la bande sont écrits.
+- **Criteria** : critères de sélection sur n'importe quelle colonne, comme les
+  filtres des graphes : liste de valeurs (SN, température, état…) ou plage
+  numérique (gamme de **puissance d'entrée**, tension…). Choisir la colonne
+  dans la liste déroulante pour ajouter un critère ; 🗙 le retire.
+
+**3 · Sorting of the files**
+
+- **Niveaux de rangement** : une colonne par niveau, chacun en **📁 Folder**
+  (un sous-dossier par valeur) ou **📄 File name** (une partie du nom de
+  fichier par valeur). Exemple : *SN* en dossier puis *Set_TempC* en nom de
+  fichier donne `SN_3008260/CGY2272_Set_TempC_-40.0.csv`, `…_25.0.csv`… ;
+  ⏶ ⏷ changent l'ordre, 🗙 retire un niveau. Sans niveau, tout va dans un seul
+  fichier CSV.
+- **Column names in the folder / file names** : `SN_3008260` plutôt que
+  `3008260` (les unités entre crochets sont retirées des noms).
+- **File names start with** : début des noms de fichiers (par défaut le nom du
+  fichier de données).
+- **Curves** : une **courbe** est l'ensemble des points qui ont les mêmes
+  valeurs dans les colonnes indiquées (*A curve = SN Set_TempC …*), triés par
+  X. Ces colonnes sont **trouvées automatiquement** (les colonnes de
+  conditions — SN, température, alimentation, état… — qui rendent chaque
+  fréquence unique dans une courbe) ; décocher la case pour les choisir à la
+  main. Chaque courbe est lissée séparément et donne **un fichier `.s2p`**.
+  Si des fréquences se répètent dans une courbe, un avertissement l'indique :
+  ajouter une colonne ou un critère.
+
+**4 · Smoothing**
+
+![Lissage colonne par colonne et aperçu de S21](screenshots/export_data_smoothing.png)
+
+- **Smooth the exported values** active le lissage.
+- **Default smoothing** : la méthode et les réglages utilisés par toutes les
+  colonnes réglées sur *Default* — les mêmes méthodes que pour les graphes
+  (§ 5.2) : spline de lissage, LOESS, moyenne glissante, gaussien,
+  Savitzky–Golay, médiane, exponentiel, moyenne sur une largeur en X, avec les
+  préréglages *Light / Medium / Strong / Trend / Remove spikes*.
+- **Per column** : pour chaque colonne, **Default**, **Custom** (ses propres
+  réglages : *✏ Edit* ouvre l'éditeur, *Copy the default* part du réglage par
+  défaut) ou **None** (non lissée). Exemple : LOESS robuste sur S11, spline
+  sur S21, aucune modification des phases. Cliquer sur le nom d'une colonne
+  l'affiche dans l'aperçu.
+- Chaque courbe est lissée sur **toute sa plage** puis coupée à la bande : pas
+  de déformation aux limites de la bande. Les **phases** (colonnes `…deg`,
+  marquées ∠) sont **déroulées** avant le lissage (pas de saut à ±180°) puis
+  ramenées entre −180° et +180°.
+- Les valeurs lissées sont calculées **aux fréquences mesurées** : les lignes
+  exportées gardent leurs valeurs de X.
+- **CSV: also write the unsmoothed values** ajoute, après chaque colonne
+  lissée, une colonne « … (unsmoothed) » avec la valeur d'origine.
+
+**5 · Formats and folder**
+
+- **CSV** : séparateur virgule, point-virgule ou tabulation ; **decimal
+  comma** pour un Excel français (avec le séparateur `;`). Colonnes écrites :
+  les colonnes de courbe (SN, température…), X, puis les colonnes choisies.
+- **Touchstone .s2p** : un fichier par courbe, format **DB** (dB / angle),
+  **MA** (module / angle) ou **RI** (réel / imaginaire), unité de fréquence
+  (Hz … GHz), impédance de référence **R**. *Frequency unit of the data* :
+  unité de la colonne X (détectée automatiquement). Les colonnes S11 … S22
+  sont reconnues par leur nom (`S21db`, `S21deg`…) ; *Columns…* permet de les
+  choisir. Un paramètre absent est écrit à 0 (et signalé dans l'en-tête du
+  fichier), une phase absente vaut 0°. L'en-tête de chaque `.s2p` rappelle la
+  source, le de-embedding, la courbe et le lissage de chaque paramètre.
+- **Folder** : le dossier de destination (*📂 Choose…*). Les fichiers de même
+  nom sont remplacés.
+- **💾 Export N file(s)** : écrit les fichiers en tâche de fond (barre de
+  progression, *Cancel*). À la fin, le nombre de fichiers et la durée sont
+  affichés, avec *Open the folder*. Un fichier `…_export_info.txt` écrit à
+  côté des données résume tous les réglages (source, de-embedding, bande,
+  critères, lissage de chaque colonne).
+
+L'export est rapide : environ **2 s pour un million de lignes**, et quelques
+secondes pour plusieurs milliers de fichiers `.s2p`. Tous les réglages de la
+page sont enregistrés dans l'espace de travail.
+
+# 10. Espaces de travail
 
 Un espace de travail (`.ctw`) contient la liste des fichiers de données et
 leurs options (de-embedding compris), les fonctions utilisateur, tous les
@@ -517,7 +629,7 @@ d'origine.
 Astuce : associer l'extension `.ctw` à `CurveTracer.exe` dans Windows permet
 d'ouvrir un projet par double-clic.
 
-# 10. Questions fréquentes
+# 11. Questions fréquentes
 
 **Le graphe affiche « Select an X column and at least one Y column ».**
 Choisir X et au moins un Y dans *Data → Select Data*.

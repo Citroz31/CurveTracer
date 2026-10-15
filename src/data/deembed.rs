@@ -386,7 +386,7 @@ impl FreqUnit {
         }
     }
 
-    fn mult(self) -> f64 {
+    pub fn mult(self) -> f64 {
         match self {
             FreqUnit::Auto | FreqUnit::Hz => 1.0,
             FreqUnit::KHz => 1e3,
@@ -396,7 +396,7 @@ impl FreqUnit {
     }
 
     /// Guesses the unit from the largest frequency of the data.
-    fn guess(max: f64) -> FreqUnit {
+    pub fn guess(max: f64) -> FreqUnit {
         if max < 1e3 {
             FreqUnit::GHz
         } else if max < 1e6 {

@@ -12,6 +12,22 @@
 > Les étapes pour supprimer définitivement cet avertissement (signature de code) sont décrites dans `docs/SIGNATURE_WINDOWS.md`.
 > `SHA256SUMS.txt` donne l'empreinte de chaque fichier (vérification, liste blanche du service informatique).
 
+## Nouveautés de la version 0.4.0 — export des données
+
+- **Nouvelle page Export Data** : export des données de son choix en **CSV** et / ou **Touchstone `.s2p`**
+  (un fichier par courbe, format DB / MA / RI, unité de fréquence et impédance de référence au choix).
+- Les données exportées sont celles **après de-embedding** (ou les données brutes, au choix).
+- **Sélection** : colonnes, **bande de fréquence**, critères sur n'importe quelle colonne (SN, température,
+  gamme de puissance d'entrée…).
+- **Rangement des fichiers** : sous-dossiers et / ou parties du nom de fichier par valeur des colonnes choisies
+  (ex. un dossier par SN, un fichier par température) ; aperçu de l'arborescence avant l'export.
+- **Lissage colonne par colonne** : un lissage par défaut, puis *Default / Custom / None* pour chaque paramètre,
+  avec toutes les méthodes (spline, LOESS, Savitzky–Golay…) ; lissage sur toute la courbe puis coupure à la
+  bande, phases déroulées avant lissage ; aperçu brut / lissé de chaque courbe.
+- **Rapide** : export en tâche de fond, ~2 s pour un million de lignes, plusieurs milliers de `.s2p` en
+  quelques secondes ; un fichier récapitulatif des réglages est écrit avec les données.
+- La page *Export* devient *Export Plots*.
+
 ## Nouveautés de la version 0.3.5
 
 - **Lissage nettement meilleur sur les courbes à peu de points** : nouvelle **spline de lissage** (méthode par défaut, un seul réglage « Smoothness »)

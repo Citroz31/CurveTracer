@@ -1,5 +1,6 @@
 //! User interface: top bar, navigation, status bar and the pages.
 
+pub mod data_export;
 pub mod data_page;
 pub mod export_page;
 pub mod files;
@@ -39,6 +40,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         Page::Functions => functions::show(app, ui),
         Page::Plots => plots::show(app, ui),
         Page::Export => export_page::show(app, ui),
+        Page::DataExport => data_export::show(app, ui),
         Page::Help => help::show(ui),
     });
     preview_dropped_files(ui.ctx());
@@ -104,7 +106,8 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
                         (Page::Data, "Data"),
                         (Page::Functions, "Functions"),
                         (Page::Plots, "Plots"),
-                        (Page::Export, "Export"),
+                        (Page::Export, "Export Plots"),
+                        (Page::DataExport, "Export Data"),
                     ] {
                         if ui.button(label).clicked() {
                             app.page = p;
@@ -253,7 +256,8 @@ fn nav_bar(app: &mut App, ui: &mut Ui) {
                 (Page::Data, "▦  Data".to_owned()),
                 (Page::Functions, format!("Σ  Functions ({fn_count})")),
                 (Page::Plots, format!("📈  Plots ({plot_count})")),
-                (Page::Export, "📤  Export".to_owned()),
+                (Page::Export, "📤  Export Plots".to_owned()),
+                (Page::DataExport, "💾  Export Data".to_owned()),
                 (Page::Help, "❓  Help".to_owned()),
             ];
             for (page, label) in items {

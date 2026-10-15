@@ -51,10 +51,19 @@ pub fn show(ui: &mut Ui) {
         section(ui, "5. User functions", |ui| {
             ui.label("• Functions page: new columns computed from formulas, e.g. Frequency (GHz) = [Freq] / 1e9, Gain = [S21db] - [Thru Loss].");
         });
-        section(ui, "6. Export", |ui| {
-            ui.label("• Export page: choose the plots and the slide titles, then Download PowerPoint (one 16:9 slide per plot), PNG or SVG images or the plot data as CSV.");
+        section(ui, "6. Export Plots", |ui| {
+            ui.label("• Export Plots page: choose the plots and the slide titles, then Download PowerPoint (one 16:9 slide per plot), PNG or SVG images or the plot data as CSV.");
             ui.label("• The PowerPoint embeds vector (SVG) plots with a PNG copy; the PNG / SVG buttons of the Plots page save the current plot.");
             ui.label("• Save the workspace (QuickSave / Ctrl+S) to find all the plots again later.");
+        });
+        section(ui, "7. Export Data (CSV / Touchstone .s2p)", |ui| {
+            ui.label("• Export Data page: writes the data of your choice, after the de-embedding (or raw if you prefer), as CSV and / or .s2p files.");
+            ui.label("• Choose the X column (frequency), the columns, the X band (e.g. 40 … 65 GHz) and criteria (SN, temperature, input power range…).");
+            ui.label("• Sorting: one folder or one file name part per value of the columns you choose (e.g. a folder per SN, a file per temperature).");
+            ui.label("• A curve = the points with the same values of the curve columns (found automatically, editable), sorted by X: one .s2p file per curve.");
+            ui.label("• Smoothing: a default method for every column, then Default / Custom / None column by column (e.g. LOESS on S11, spline on S21, no smoothing on the phases).");
+            ui.label("    Each curve is smoothed on its whole range then cut to the band; phases are unwrapped first. Click a column to preview its smoothing.");
+            ui.label("• Formats: CSV (comma, semicolon or tab, decimal comma) · Touchstone DB / MA / RI, Hz…GHz, reference impedance. A summary file lists the settings.");
         });
         ui.add_space(8.0);
         ui.label(RichText::new(format!("CurveTracer {}", env!("CARGO_PKG_VERSION"))).weak());

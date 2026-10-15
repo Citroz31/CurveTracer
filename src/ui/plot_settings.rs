@@ -114,7 +114,7 @@ fn modifier_combo(ui: &mut Ui, id: &str, scale: &mut Scale) {
     });
 }
 
-fn new_filter(col: &Column) -> FilterConfig {
+pub fn new_filter(col: &Column) -> FilterConfig {
     match col.dict() {
         Some(dict) => FilterConfig {
             column: col.name.clone(),
@@ -480,7 +480,13 @@ fn apply_column_action(
     }
 }
 
-fn filter_editor(ui: &mut Ui, k: usize, f: &mut FilterConfig, col: &Column, search: &mut String) {
+pub fn filter_editor(
+    ui: &mut Ui,
+    k: impl std::hash::Hash + std::fmt::Debug,
+    f: &mut FilterConfig,
+    col: &Column,
+    search: &mut String,
+) {
     ui.horizontal(|ui| {
         if col.is_dict() {
             ui.radio_value(&mut f.mode, FilterMode::Values, "Values");
@@ -624,161 +630,180 @@ fn smoothing_section(ui: &mut Ui, sm: &mut SmoothConfig) {
         ui.checkbox(&mut sm.enabled, RichText::new("Smooth the curves").strong())
             .on_hover_text("Applied to every curve of this plot (after the processing above, if any)");
         ui.add_enabled_ui(sm.enabled, |ui| {
-            egui::Grid::new("smooth_grid")
-                .num_columns(2)
-                .spacing([10.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label("Method");
-                    egui::ComboBox::from_id_salt("smooth_method")
-                        .selected_text(sm.method.label())
-                        .width(230.0)
-                        .show_ui(ui, |ui| {
-                            for m in SmoothMethod::ALL {
-                                ui.selectable_value(&mut sm.method, m, m.label())
-                                    .on_hover_text(m.help());
-                            }
-                        });
-                    ui.end_row();
+            smoothing_editor(ui, "plot", sm, false);
+        });
+    });
+}
 
-                    match sm.method {
-                        SmoothMethod::Spline => {
-                            ui.label("Smoothness").on_hover_text(
-                                "0 % follows the points, 100 % is almost a straight line. \
-                                 Same effect whatever the number of points.",
-                            );
-                            let mut pct = sm.smoothness * 100.0;
-                            if ui
-                                .add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix(" %").max_decimals(0))
-                                .changed()
-                            {
-                                sm.smoothness = pct / 100.0;
-                            }
-                            ui.end_row();
-                        }
-                        SmoothMethod::Loess => {
-                            ui.label("Span")
-                                .on_hover_text("Fraction of the points used around each X: bigger = smoother");
-                            let mut pct = sm.span * 100.0;
-                            if ui
-                                .add(egui::Slider::new(&mut pct, 5.0..=100.0).suffix(" %").max_decimals(0))
-                                .changed()
-                            {
-                                sm.span = pct / 100.0;
-                            }
-                            ui.end_row();
-                            ui.label("Local fit");
-                            ui.horizontal(|ui| {
-                                ui.radio_value(&mut sm.degree, 1, "Linear");
-                                ui.radio_value(&mut sm.degree, 2, "Quadratic");
-                                ui.checkbox(&mut sm.robust, "Robust")
-                                    .on_hover_text("Ignore the outliers (isolated wrong points)");
-                            });
-                            ui.end_row();
-                        }
-                        SmoothMethod::Gaussian => {
-                            ui.label("σ (points)")
-                                .on_hover_text("Standard deviation of the bell, in points: bigger = smoother");
-                            ui.add(
-                                egui::Slider::new(&mut sm.sigma, 0.5..=50.0)
-                                    .logarithmic(true)
-                                    .max_decimals(1),
-                            );
-                            ui.end_row();
-                        }
-                        SmoothMethod::XWindow => {
-                            ui.label("Width (X units)")
-                                .on_hover_text("Points closer than ± width / 2 are averaged (e.g. 0.5 = ±0.25 GHz)");
-                            let speed = (sm.x_width.abs() * 0.01).max(1e-9);
-                            ui.add(
-                                egui::DragValue::new(&mut sm.x_width)
-                                    .range(1e-12..=1e15)
-                                    .speed(speed)
-                                    .max_decimals(6),
-                            );
-                            ui.end_row();
-                        }
-                        _ => {
-                            let label = if sm.method == SmoothMethod::Exponential {
-                                "Span (points)"
-                            } else {
-                                "Window (points)"
-                            };
-                            ui.label(label)
-                                .on_hover_text("Number of points used for each value: bigger = smoother");
-                            let mut w = sm.window as u32;
-                            if ui
-                                .add(egui::Slider::new(&mut w, 3..=301).logarithmic(true).step_by(2.0))
-                                .changed()
-                            {
-                                sm.window = (w as usize) | 1;
-                            }
-                            ui.end_row();
-                        }
+/// Settings of a smoothing (method and its parameters, presets). `export`:
+/// for the data export (no display options).
+pub fn smoothing_editor(
+    ui: &mut Ui,
+    id: impl std::hash::Hash + std::fmt::Debug + Copy,
+    sm: &mut SmoothConfig,
+    export: bool,
+) {
+    egui::Grid::new(("smooth_grid", id))
+        .num_columns(2)
+        .spacing([10.0, 6.0])
+        .show(ui, |ui| {
+            ui.label("Method");
+            egui::ComboBox::from_id_salt(("smooth_method", id))
+                .selected_text(sm.method.label())
+                .width(230.0)
+                .show_ui(ui, |ui| {
+                    for m in SmoothMethod::ALL {
+                        ui.selectable_value(&mut sm.method, m, m.label())
+                            .on_hover_text(m.help());
                     }
-                    if sm.method == SmoothMethod::SavitzkyGolay {
-                        ui.label("Polynomial order")
-                            .on_hover_text("2 or 3 for most curves; higher keeps sharper details but smooths less");
-                        let max = sm.window.saturating_sub(1).clamp(1, 6);
-                        ui.add(egui::Slider::new(&mut sm.order, 1..=max));
-                        ui.end_row();
+                });
+            ui.end_row();
+
+            match sm.method {
+                SmoothMethod::Spline => {
+                    ui.label("Smoothness").on_hover_text(
+                        "0 % follows the points, 100 % is almost a straight line. \
+                         Same effect whatever the number of points.",
+                    );
+                    let mut pct = sm.smoothness * 100.0;
+                    if ui
+                        .add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix(" %").max_decimals(0))
+                        .changed()
+                    {
+                        sm.smoothness = pct / 100.0;
                     }
-                    if !sm.is_curve_method() {
-                        ui.label("Passes")
-                            .on_hover_text("Apply the smoothing several times (smoother)");
-                        ui.add(egui::Slider::new(&mut sm.passes, 1..=5));
-                        ui.end_row();
+                    ui.end_row();
+                }
+                SmoothMethod::Loess => {
+                    ui.label("Span")
+                        .on_hover_text("Fraction of the points used around each X: bigger = smoother");
+                    let mut pct = sm.span * 100.0;
+                    if ui
+                        .add(egui::Slider::new(&mut pct, 5.0..=100.0).suffix(" %").max_decimals(0))
+                        .changed()
+                    {
+                        sm.span = pct / 100.0;
                     }
-                    ui.label("Display");
+                    ui.end_row();
+                    ui.label("Local fit");
                     ui.horizontal(|ui| {
-                        ui.checkbox(&mut sm.interpolate, "Smooth curve between the points")
-                            .on_hover_text(
-                                "Draw a continuous smooth curve instead of straight segments between the points \
-                             (for curves with fewer points than the setting)",
-                            );
-                        ui.add_enabled(
-                            sm.interpolate,
-                            egui::DragValue::new(&mut sm.display_points)
-                                .range(50..=5000)
-                                .speed(10.0)
-                                .suffix(" pts"),
-                        );
+                        ui.radio_value(&mut sm.degree, 1, "Linear");
+                        ui.radio_value(&mut sm.degree, 2, "Quadratic");
+                        ui.checkbox(&mut sm.robust, "Robust")
+                            .on_hover_text("Ignore the outliers (isolated wrong points)");
                     });
                     ui.end_row();
-                });
-            ui.label(RichText::new(sm.method.help()).weak().small());
-            ui.checkbox(&mut sm.keep_original, "Keep the raw curves (shown lighter)");
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Presets:").weak());
-                let mut preset = |ui: &mut Ui, name: &str, tip: &str, f: &dyn Fn(&mut SmoothConfig)| {
-                    if ui.small_button(name).on_hover_text(tip).clicked() {
-                        f(sm);
-                    }
-                };
-                for (name, value) in [("Light", 0.3), ("Medium", 0.5), ("Strong", 0.7)] {
-                    preset(ui, name, "Smoothing spline", &move |sm: &mut SmoothConfig| {
-                        sm.method = SmoothMethod::Spline;
-                        sm.smoothness = value;
-                        sm.interpolate = true;
-                    });
                 }
-                preset(
-                    ui,
-                    "Trend",
-                    "Robust LOESS on half of the points: the general trend",
-                    &|sm| {
-                        sm.method = SmoothMethod::Loess;
-                        sm.span = 0.5;
-                        sm.degree = 2;
-                        sm.robust = true;
-                        sm.interpolate = true;
-                    },
-                );
-                preset(ui, "Remove spikes", "Median of 5 points", &|sm| {
-                    sm.method = SmoothMethod::Median;
-                    sm.window = 5;
-                    sm.passes = 1;
+                SmoothMethod::Gaussian => {
+                    ui.label("σ (points)")
+                        .on_hover_text("Standard deviation of the bell, in points: bigger = smoother");
+                    ui.add(
+                        egui::Slider::new(&mut sm.sigma, 0.5..=50.0)
+                            .logarithmic(true)
+                            .max_decimals(1),
+                    );
+                    ui.end_row();
+                }
+                SmoothMethod::XWindow => {
+                    ui.label("Width (X units)").on_hover_text(if export {
+                        "Points closer than ± width / 2 are averaged, in the units of the data (e.g. 5e8 = ±0.25 GHz \
+                         for frequencies in Hz)"
+                    } else {
+                        "Points closer than ± width / 2 are averaged (e.g. 0.5 = ±0.25 GHz)"
+                    });
+                    let speed = (sm.x_width.abs() * 0.01).max(1e-9);
+                    ui.add(
+                        egui::DragValue::new(&mut sm.x_width)
+                            .range(1e-12..=1e15)
+                            .speed(speed)
+                            .max_decimals(6),
+                    );
+                    ui.end_row();
+                }
+                _ => {
+                    let label = if sm.method == SmoothMethod::Exponential {
+                        "Span (points)"
+                    } else {
+                        "Window (points)"
+                    };
+                    ui.label(label)
+                        .on_hover_text("Number of points used for each value: bigger = smoother");
+                    let mut w = sm.window as u32;
+                    if ui
+                        .add(egui::Slider::new(&mut w, 3..=301).logarithmic(true).step_by(2.0))
+                        .changed()
+                    {
+                        sm.window = (w as usize) | 1;
+                    }
+                    ui.end_row();
+                }
+            }
+            if sm.method == SmoothMethod::SavitzkyGolay {
+                ui.label("Polynomial order")
+                    .on_hover_text("2 or 3 for most curves; higher keeps sharper details but smooths less");
+                let max = sm.window.saturating_sub(1).clamp(1, 6);
+                ui.add(egui::Slider::new(&mut sm.order, 1..=max));
+                ui.end_row();
+            }
+            if !sm.is_curve_method() {
+                ui.label("Passes")
+                    .on_hover_text("Apply the smoothing several times (smoother)");
+                ui.add(egui::Slider::new(&mut sm.passes, 1..=5));
+                ui.end_row();
+            }
+            if !export {
+                ui.label("Display");
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut sm.interpolate, "Smooth curve between the points")
+                        .on_hover_text(
+                            "Draw a continuous smooth curve instead of straight segments between the points \
+                         (for curves with fewer points than the setting)",
+                        );
+                    ui.add_enabled(
+                        sm.interpolate,
+                        egui::DragValue::new(&mut sm.display_points)
+                            .range(50..=5000)
+                            .speed(10.0)
+                            .suffix(" pts"),
+                    );
                 });
+                ui.end_row();
+            }
+        });
+    ui.label(RichText::new(sm.method.help()).weak().small());
+    if !export {
+        ui.checkbox(&mut sm.keep_original, "Keep the raw curves (shown lighter)");
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("Presets:").weak());
+        let mut preset = |ui: &mut Ui, name: &str, tip: &str, f: &dyn Fn(&mut SmoothConfig)| {
+            if ui.small_button(name).on_hover_text(tip).clicked() {
+                f(sm);
+            }
+        };
+        for (name, value) in [("Light", 0.3), ("Medium", 0.5), ("Strong", 0.7)] {
+            preset(ui, name, "Smoothing spline", &move |sm: &mut SmoothConfig| {
+                sm.method = SmoothMethod::Spline;
+                sm.smoothness = value;
+                sm.interpolate = true;
             });
+        }
+        preset(
+            ui,
+            "Trend",
+            "Robust LOESS on half of the points: the general trend",
+            &|sm| {
+                sm.method = SmoothMethod::Loess;
+                sm.span = 0.5;
+                sm.degree = 2;
+                sm.robust = true;
+                sm.interpolate = true;
+            },
+        );
+        preset(ui, "Remove spikes", "Median of 5 points", &|sm| {
+            sm.method = SmoothMethod::Median;
+            sm.window = 5;
+            sm.passes = 1;
         });
     });
 }

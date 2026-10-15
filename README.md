@@ -120,7 +120,7 @@ Colonnes calculées par formule, disponibles dans toutes les sources :
 `sqrt`, `log10`, `abs`, `min`, `max`, `^`… Les noms de colonnes s'écrivent entre
 crochets (`[VDD Supply Current [A]]`) ou directement s'ils sont simples (`S21db`).
 
-### Export (page *Export*)
+### Export des graphes (page *Export Plots*)
 - Miniatures de tous les graphes, sélection, titre de chaque diapositive.
 - **Download PowerPoint** : une diapositive 16:9 par graphe (titre + image haute
   résolution), format *Plot only* ou *Plot + Settings* (source, X, Y, séries,
@@ -132,6 +132,18 @@ crochets (`[VDD Supply Current [A]]`) ou directement s'ils sont simples (`S21db`
 
 ![Export](docs/screenshots/export.png)
 ![Diapositive](docs/screenshots/slide-1.png)
+
+### Export des données (page *Export Data*)
+- Données **après de-embedding** (ou brutes) en **CSV** (virgule, point-virgule, tabulation, virgule décimale)
+  et / ou **Touchstone `.s2p`** (DB / MA / RI, Hz … GHz, impédance de référence) — un `.s2p` par courbe.
+- Choix des colonnes, de la **bande de fréquence** et de **critères** (SN, température, gamme de puissance…).
+- **Rangement** en sous-dossiers / noms de fichiers par valeur des colonnes choisies (ex. un dossier par SN,
+  un fichier par température) ; courbes détectées automatiquement (SN, température, état…).
+- **Lissage colonne par colonne** (défaut / personnalisé / aucun, toutes les méthodes du lissage des graphes) ;
+  courbes lissées sur toute leur plage puis coupées à la bande, phases déroulées.
+- Aperçu de l'arborescence et de chaque courbe lissée ; export en tâche de fond (~2 s par million de lignes).
+
+![Export Data](docs/screenshots/export_data.png)
 
 ### Espace de travail
 `File → Save workspace` / **QuickSave** (`Ctrl+S`) : sauvegarde des sources,
@@ -188,7 +200,7 @@ puis en-tête en ligne 5, 7 SN × 3 températures × 2 tensions VDD) et deux acc
 | `src/plot/render.rs` | rendu PNG (tiny-skia + ab_glyph) et SVG pour les exports |
 | `src/data/deembed.rs` | lecture Touchstone `.s2p`, de-embedding vectoriel / scalaire |
 | `src/plot/geom.rs` | géométrie partagée : placement de la légende, décimation, graduations |
-| `src/export/` | écriture PowerPoint (`.pptx`) et ZIP |
+| `src/export/` | écriture PowerPoint (`.pptx`) et ZIP, export des données CSV / Touchstone (`data.rs`) |
 | `src/ui/` | pages de l'interface (`start.rs` : écran d'accueil des workspaces) |
 | `src/recent.rs` | mémoire des workspaces récents |
 

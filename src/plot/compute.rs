@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 use std::time::Instant;
 
-use super::config::{AggFunc, FilterMode, PlotConfig};
+use super::config::{AggFunc, FilterConfig, FilterMode, PlotConfig};
 use crate::data::dataset::{Column, ColumnKind, Dataset};
 use crate::data::hash::FxHashMap;
 
@@ -72,6 +72,54 @@ impl Pred<'_> {
                 v >= *lo && v <= *hi
             }
         }
+    }
+}
+
+/// Rows of the dataset kept by the (enabled) filters, in file order.
+pub fn filter_rows(ds: &Dataset, filters: &[FilterConfig], warnings: &mut Vec<String>) -> Vec<u32> {
+    let mut preds: Vec<Pred<'_>> = Vec::new();
+    for f in filters.iter().filter(|f| f.enabled) {
+        let Some(col) = ds.column(&f.column) else {
+            warnings.push(format!("Filter column '{}' not found", f.column));
+            continue;
+        };
+        match f.mode {
+            FilterMode::Values => {
+                if let Some(dict) = col.dict() {
+                    // one hash lookup per selected value (thousands of states)
+                    let index: FxHashMap<&str, usize> = dict.iter().enumerate().map(|(i, d)| (d.as_str(), i)).collect();
+                    let mut allowed = vec![false; dict.len()];
+                    for v in &f.values {
+                        if let Some(&c) = index.get(v.as_str()) {
+                            allowed[c] = true;
+                        }
+                    }
+                    if allowed.iter().all(|&a| a) {
+                        continue; // every value selected: no filtering
+                    }
+                    preds.push(Pred::Codes(col, allowed));
+                } else {
+                    let mut bits: Vec<u64> = f
+                        .values
+                        .iter()
+                        .filter_map(|v| v.trim().parse::<f64>().ok())
+                        .map(|v| if v == 0.0 { 0.0f64 } else { v }.to_bits())
+                        .collect();
+                    bits.sort_unstable();
+                    preds.push(Pred::Bits(col, bits));
+                }
+            }
+            FilterMode::Range => {
+                let lo = f.min.unwrap_or(f64::NEG_INFINITY);
+                let hi = f.max.unwrap_or(f64::INFINITY);
+                preds.push(Pred::Range(col, lo, hi));
+            }
+        }
+    }
+    if preds.is_empty() {
+        (0..ds.n_rows as u32).collect()
+    } else {
+        par_filter(ds.n_rows, |r| preds.iter().all(|p| p.pass(r)))
     }
 }
 
@@ -258,50 +306,7 @@ pub fn compute(ds: &Dataset, cfg: &PlotConfig) -> PlotData {
     }
 
     // ---- filters ----------------------------------------------------------
-    let mut preds: Vec<Pred<'_>> = Vec::new();
-    for f in cfg.filters.iter().filter(|f| f.enabled) {
-        let Some(col) = ds.column(&f.column) else {
-            warnings.push(format!("Filter column '{}' not found", f.column));
-            continue;
-        };
-        match f.mode {
-            FilterMode::Values => {
-                if let Some(dict) = col.dict() {
-                    // one hash lookup per selected value (thousands of states)
-                    let index: FxHashMap<&str, usize> = dict.iter().enumerate().map(|(i, d)| (d.as_str(), i)).collect();
-                    let mut allowed = vec![false; dict.len()];
-                    for v in &f.values {
-                        if let Some(&c) = index.get(v.as_str()) {
-                            allowed[c] = true;
-                        }
-                    }
-                    if allowed.iter().all(|&a| a) {
-                        continue; // every value selected: no filtering
-                    }
-                    preds.push(Pred::Codes(col, allowed));
-                } else {
-                    let mut bits: Vec<u64> = f
-                        .values
-                        .iter()
-                        .filter_map(|v| v.trim().parse::<f64>().ok())
-                        .map(|v| if v == 0.0 { 0.0f64 } else { v }.to_bits())
-                        .collect();
-                    bits.sort_unstable();
-                    preds.push(Pred::Bits(col, bits));
-                }
-            }
-            FilterMode::Range => {
-                let lo = f.min.unwrap_or(f64::NEG_INFINITY);
-                let hi = f.max.unwrap_or(f64::INFINITY);
-                preds.push(Pred::Range(col, lo, hi));
-            }
-        }
-    }
-    let rows: Vec<u32> = if preds.is_empty() {
-        (0..ds.n_rows as u32).collect()
-    } else {
-        par_filter(ds.n_rows, |r| preds.iter().all(|p| p.pass(r)))
-    };
+    let rows = filter_rows(ds, &cfg.filters, &mut warnings);
 
     // ---- series grouping ---------------------------------------------------
     let mut scols: Vec<&Column> = Vec::new();

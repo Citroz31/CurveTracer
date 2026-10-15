@@ -243,6 +243,56 @@ impl SmoothConfig {
         x.into_iter().zip(y).map(|(x, y)| [x, y]).collect()
     }
 
+    /// Smoothed values at the points themselves (data export): `x` ascending,
+    /// one value per point, so the exported rows keep their X values. Points
+    /// with a NaN are ignored by the fit and stay NaN.
+    pub fn values_at(&self, x: &[f64], y: &[f64]) -> Vec<f64> {
+        let idx: Vec<usize> = (0..x.len().min(y.len()))
+            .filter(|&i| x[i].is_finite() && y[i].is_finite())
+            .collect();
+        let mut out = vec![f64::NAN; y.len()];
+        if idx.len() < 3 {
+            for &i in &idx {
+                out[i] = y[i];
+            }
+            return out;
+        }
+        let fx: Vec<f64> = idx.iter().map(|&i| x[i]).collect();
+        let fy: Vec<f64> = idx.iter().map(|&i| y[i]).collect();
+        let values = if self.is_curve_method() {
+            let pairs: Vec<[f64; 2]> = fx.iter().zip(&fy).map(|(&a, &b)| [a, b]).collect();
+            let (ux, uy, w) = merge_equal_x(&pairs);
+            if ux.len() < 3 {
+                fy.clone()
+            } else if self.method == SmoothMethod::Spline {
+                smoothing_spline(&ux, &uy, &w, self.smoothness, &fx)
+            } else {
+                let n = ux.len();
+                let step = n.div_ceil(2000).max(1);
+                let mut knots: Vec<usize> = (0..n).step_by(step).collect();
+                if knots.last() != Some(&(n - 1)) {
+                    knots.push(n - 1);
+                }
+                let kx: Vec<f64> = knots.iter().map(|&i| ux[i]).collect();
+                let ky = loess(&ux, &uy, self.span, self.degree, self.robust, &kx);
+                if kx.len() >= 3 {
+                    pchip(&kx, &ky, &fx)
+                } else {
+                    fy.clone()
+                }
+            }
+        } else {
+            let mut plain = self.clone();
+            plain.interpolate = false;
+            let pts: Vec<[f64; 2]> = fx.iter().zip(&fy).map(|(&a, &b)| [a, b]).collect();
+            plain.apply(&pts).into_iter().map(|p| p[1]).collect()
+        };
+        for (k, &i) in idx.iter().enumerate() {
+            out[i] = values.get(k).copied().unwrap_or(f64::NAN);
+        }
+        out
+    }
+
     /// X values of the output: a dense regular grid (smooth display) or the
     /// X values of the points.
     fn output_grid(&self, x: &[f64]) -> Vec<f64> {

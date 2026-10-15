@@ -127,6 +127,7 @@ pub enum Page {
     Functions,
     Plots,
     Export,
+    DataExport,
     Help,
 }
 
@@ -245,6 +246,7 @@ pub struct Workspace {
     pub plots: Vec<PlotConfig>,
     pub export: ExportSettings,
     pub fonts: Vec<PathBuf>,
+    pub data_export: crate::export::data::DataExportConfig,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -277,6 +279,9 @@ pub struct App {
     task_rx: Receiver<TaskMsg>,
     pub busy: Option<String>,
     pub export: ExportSettings,
+    /// Export Data page: settings (saved) and state (plan, running export).
+    pub data_export: crate::export::data::DataExportConfig,
+    pub dx: crate::ui::data_export::DataExportState,
     next_id: u64,
     pub workspace_path: Option<PathBuf>,
     /// Start screen (choose / create a workspace) shown instead of the pages.
@@ -354,6 +359,8 @@ impl App {
             task_rx,
             busy: None,
             export: ExportSettings::default(),
+            data_export: Default::default(),
+            dx: Default::default(),
             next_id: 1,
             workspace_path: None,
             show_start: true,
@@ -438,6 +445,11 @@ impl App {
             error,
             at: Instant::now(),
         });
+    }
+
+    /// Context to wake the user interface up from a background job.
+    pub fn repaint_ctx(&self) -> Context {
+        self.repaint.clone()
     }
 
     fn new_id(&mut self) -> u64 {
@@ -701,6 +713,7 @@ impl App {
             self.snapshot_pending = false;
             self.saved_snapshot = Some(self.snapshot());
         }
+        crate::ui::data_export::poll(self);
         while let Ok(msg) = self.task_rx.try_recv() {
             self.busy = None;
             match msg {
@@ -1000,6 +1013,7 @@ impl App {
                 .filter(|f| f.user)
                 .filter_map(|f| f.path.clone())
                 .collect(),
+            data_export: self.data_export.clone(),
         }
     }
 
@@ -1091,6 +1105,13 @@ impl App {
                 src.deembed = s.deembed;
             }
         }
+        self.data_export = ws.data_export;
+        if let Some((_, k)) = key_map
+            .iter()
+            .find(|(o, n)| *o == self.data_export.source || *n == self.data_export.source)
+        {
+            self.data_export.source = k.clone();
+        }
         for mut cfg in ws.plots {
             if let Some((_, k)) = key_map.iter().find(|(o, n)| *o == cfg.source || *n == cfg.source) {
                 cfg.source = k.clone();
@@ -1136,6 +1157,11 @@ impl App {
     fn snapshot(&self) -> String {
         let mut ws = self.workspace();
         ws.export.last_dir = None;
+        if let Some((before, after)) = &self.dx.auto_defaults
+            && *after == ws.data_export
+        {
+            ws.data_export = before.clone();
+        }
         serde_json::to_string(&ws).unwrap_or_default()
     }
 
@@ -1177,6 +1203,8 @@ impl App {
             last_dir,
             ..Default::default()
         };
+        self.data_export = Default::default();
+        self.dx = Default::default();
         self.workspace_path = None;
         self.saved_snapshot = None;
         self.snapshot_pending = false;
@@ -1570,6 +1598,7 @@ impl eframe::App for App {
         if self.busy.is_some()
             || self.sources.iter().any(|s| s.loading || s.rebuilding)
             || self.plots.iter().any(|p| p.state.is_computing())
+            || self.dx.is_busy()
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }

@@ -1,3 +1,4 @@
+pub mod data;
 pub mod pptx;
 pub mod zip;
 
