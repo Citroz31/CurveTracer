@@ -10,7 +10,7 @@ use egui::{
 };
 
 use super::{ERR, NAVY, NAVY_LIGHT, WARN, plot_settings, section, thousands};
-use crate::app::App;
+use crate::app::{App, ImageExport};
 use crate::plot::render::ImageFormat;
 use crate::plot::view::{EditTarget, show_plot, show_thumbnail};
 
@@ -74,8 +74,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             return;
         }
         Some(Action::Csv) => app.save_plot_csv_dialog(i),
-        Some(Action::Png) => app.save_plot_image_dialog(i, ImageFormat::Png),
-        Some(Action::Svg) => app.save_plot_image_dialog(i, ImageFormat::Svg),
+        Some(Action::Png) => app.request_image_export(ImageExport::Plot(i, ImageFormat::Png)),
+        Some(Action::Svg) => app.request_image_export(ImageExport::Plot(i, ImageFormat::Svg)),
         Some(Action::Duplicate) => {
             app.duplicate_plot(i);
             return;
@@ -433,10 +433,12 @@ fn toolbar(app: &mut App, ui: &mut Ui) -> Option<Action> {
     ui.add_space(2.0);
     ui.horizontal(|ui| {
         ui.label(RichText::new("Mouse:").weak());
-        ui.selectable_value(&mut app.box_zoom, false, "✋ Pan")
-            .on_hover_text("Left-drag moves the view (right-drag: zoom rectangle)");
-        ui.selectable_value(&mut app.box_zoom, true, "⬚ Zoom area")
-            .on_hover_text("Left-drag draws the rectangle to zoom on");
+        ui.selectable_value(&mut app.box_zoom, false, "✋ Pan").on_hover_text(
+            "Left-drag moves the view (right-drag: zoom rectangle).\nMiddle button held down: moves the view in any mode.",
+        );
+        ui.selectable_value(&mut app.box_zoom, true, "⬚ Zoom area").on_hover_text(
+            "Left-drag draws the rectangle to zoom on. Esc: back to Pan.\nMiddle button held down: moves the view.",
+        );
         ui.separator();
         let st = &app.plots[i].state;
         let has_history = !st.history.is_empty();

@@ -129,6 +129,8 @@ crochets (`[VDD Supply Current [A]]`) ou directement s'ils sont simples (`S21db`
 - **Download Images** (PNG haute résolution ou **SVG** vectoriel) et **Download Data** (CSV des courbes).
 - Boutons **PNG** / **SVG** de la page *Plots* pour enregistrer le graphe affiché.
 - Option « Use the current zoom of each plot » pour exporter exactement la vue affichée.
+- Images au format **6 × 4,2 in** (300 dpi) par défaut, placées à cette taille dans le PowerPoint ; un autre format
+  est demandé au moment de l'export.
 
 ![Export](docs/screenshots/export.png)
 ![Diapositive](docs/screenshots/slide-1.png)

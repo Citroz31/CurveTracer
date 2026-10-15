@@ -11,6 +11,7 @@ pub fn show(ui: &mut Ui) {
         section(ui, "0. Workspaces", |ui| {
             ui.label("• At start-up, create a new workspace (name + folder) or open one: the recent workspaces are listed with the time they were last used.");
             ui.label("• The 📁 menu of the top bar creates, opens or switches workspaces at any time (you are asked to save the changes first).");
+            ui.label("• The 🌙 / ☀ button left of QuickSave switches between the light and the dark theme.");
         });
         section(ui, "1. Load the data (File Select)", |ui| {
             ui.label("• Open or drag & drop CSV / TXT / Excel files. Several sources can be loaded at the same time.");
@@ -34,13 +35,15 @@ pub fn show(ui: &mut Ui) {
         });
         section(ui, "3. Explore", |ui| {
             ui.label("• Mouse wheel on a plot: previous / next plot (the list on the left shows where you are; Page Up / Page Down too).");
-            ui.label("• Ctrl + wheel / pinch: zoom · drag: pan · right-drag: zoom rectangle · drag an axis: zoom this axis.");
+            ui.label("• Ctrl + wheel / pinch: zoom · drag: pan · middle button held down: pan in any mode · right-drag: zoom rectangle · drag an axis: zoom this axis.");
+            ui.label("• Toolbar “Zoom area”: left-drag draws the zoom rectangle; Esc goes back to Pan.");
             ui.label("• Toolbar: Pan or Zoom area (left-drag draws the rectangle), zoom + / −, Fit Y, Previous view, Original scale, Axes & title.");
             ui.label("• Click on an axis to rename it and change its range / tick step; click on the title to edit it.");
             ui.label("• Double-click: original scale · hover a curve: read its values.");
             ui.label("• Click on a curve: pin a marker showing x / y (click it again to remove it). Ctrl+Z / Ctrl+Y: undo / redo.");
             ui.label("• Plot list (left): click a card to show it, drag it to reorder, right-click to duplicate / move / delete (Del, Ctrl+D).");
-            ui.label("• The legend can be dragged with the mouse. Drop it on an edge of the graph to place it outside: the plot shrinks to make room. Click an entry to hide / show a curve.");
+            ui.label("• The legend can be dragged with the mouse. Drop it on an edge of the graph to place it outside: the plot shrinks to make room. Click an entry to hide / show a curve; right-click it to change its font and size.");
+            ui.label("• Copy / Split Plot (or right-click → Duplicate) numbers the copy: “Plot 3” → “Plot 4”.");
         });
         section(ui, "4. Layout & traces", |ui| {
             ui.label("• Layout: title, axis labels and their fonts / sizes / colors, tick fonts, ranges, tick steps, decimals, grid, legend.");
@@ -54,6 +57,7 @@ pub fn show(ui: &mut Ui) {
         section(ui, "6. Export Plots", |ui| {
             ui.label("• Export Plots page: choose the plots and the slide titles, then Download PowerPoint (one 16:9 slide per plot), PNG or SVG images or the plot data as CSV.");
             ui.label("• The PowerPoint embeds vector (SVG) plots with a PNG copy; the PNG / SVG buttons of the Plots page save the current plot.");
+            ui.label("• Image size: 6 × 4.2 in (300 dpi) by default, placed at this size on the slides. Another format, or “Ask at each export”, opens the Image format window before each export.");
             ui.label("• Save the workspace (QuickSave / Ctrl+S) to find all the plots again later.");
         });
         section(ui, "7. Export Data (CSV / Touchstone .s2p)", |ui| {

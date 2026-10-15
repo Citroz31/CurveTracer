@@ -35,6 +35,9 @@ pub struct Slide {
     pub svg: Option<Vec<u8>>,
     pub img_w: u32,
     pub img_h: u32,
+    /// Physical size of the image (inches): the picture has this size on the
+    /// slide when it fits.
+    pub size_in: Option<(f64, f64)>,
     /// (heading, text) pairs shown next to the plot.
     pub settings: Vec<(String, String)>,
 }
@@ -97,7 +100,14 @@ fn slide_xml(slide: &Slide, index: usize, format: SlideFormat) -> String {
     let with_settings = format == SlideFormat::PlotAndSettings && !slide.settings.is_empty();
     let pic_area_w = if with_settings { total_w * 72 / 100 } else { total_w };
     let aspect = slide.img_w.max(1) as f64 / slide.img_h.max(1) as f64;
-    let (mut cx, mut cy) = (pic_area_w, (pic_area_w as f64 / aspect) as i64);
+    let (mut cx, mut cy) = match slide.size_in {
+        Some((w, h)) => ((w * EMU_PER_INCH as f64) as i64, (h * EMU_PER_INCH as f64) as i64),
+        None => (pic_area_w, (pic_area_w as f64 / aspect) as i64),
+    };
+    if cx > pic_area_w {
+        cx = pic_area_w;
+        cy = (pic_area_w as f64 / aspect) as i64;
+    }
     if cy > avail_h {
         cy = avail_h;
         cx = (avail_h as f64 * aspect) as i64;
@@ -378,10 +388,14 @@ mod tests {
             title: "S21 <dB>".into(),
             png,
             svg: Some(b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".to_vec()),
-            img_w: 1600,
-            img_h: 1000,
+            img_w: 1800,
+            img_h: 1260,
+            size_in: Some((6.0, 4.2)),
             settings: vec![("Source".into(), "file.csv".into())],
         }];
+        // the picture is placed at 6 × 4.2 in
+        let xml = slide_xml(&slides[0], 1, SlideFormat::PlotAndSettings);
+        assert!(xml.contains(r#"<a:ext cx="5486400" cy="3840480"/>"#), "{xml}");
         let bytes = build_pptx(&slides, "Test", SlideFormat::PlotAndSettings);
         assert!(bytes.len() > 1000);
         let s = String::from_utf8_lossy(&bytes);

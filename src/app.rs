@@ -148,12 +148,59 @@ pub enum DataTab {
     View,
 }
 
+/// Size of the exported images (PNG, SVG, PowerPoint).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ImageSize {
+    /// Width and height in inches.
+    pub w_in: f32,
+    pub h_in: f32,
+    pub dpi: u32,
+}
+
+impl ImageSize {
+    /// Standard format of the reports: 6 × 4.2 in.
+    pub const STANDARD: ImageSize = ImageSize {
+        w_in: 6.0,
+        h_in: 4.2,
+        dpi: 300,
+    };
+    pub const RATIO: f32 = 6.0 / 4.2;
+
+    /// The width / height ratio is 6 : 4.2.
+    pub fn standard_ratio(&self) -> bool {
+        self.h_in > 0.0 && (self.w_in / self.h_in - Self::RATIO).abs() < 0.002
+    }
+
+    pub fn pixels(&self) -> (u32, u32) {
+        let o = RenderOptions::physical(self.w_in, self.h_in, self.dpi as f32);
+        (o.width, o.height)
+    }
+}
+
+impl Default for ImageSize {
+    fn default() -> Self {
+        ImageSize::STANDARD
+    }
+}
+
+/// An export of images waiting for the choice of their format.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ImageExport {
+    Pptx,
+    Images,
+    Plot(usize, ImageFormat),
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExportSettings {
     pub format: SlideFormat,
-    pub width: u32,
-    pub height: u32,
+    /// Size of the images (standard 6 × 4.2 in).
+    pub size: ImageSize,
+    /// Ask the format of the images at each export (it is always asked when
+    /// the size is not in the 6 : 4.2 ratio).
+    pub ask_size: bool,
     /// Export the current zoom of each plot instead of the full range.
     pub use_view: bool,
     pub file_name: String,
@@ -168,8 +215,8 @@ impl Default for ExportSettings {
     fn default() -> Self {
         ExportSettings {
             format: SlideFormat::PlotAndSettings,
-            width: 1600,
-            height: 1000,
+            size: ImageSize::STANDARD,
+            ask_size: false,
             use_view: true,
             file_name: "CurveTracer_export".to_owned(),
             last_dir: None,
@@ -279,6 +326,8 @@ pub struct App {
     task_rx: Receiver<TaskMsg>,
     pub busy: Option<String>,
     pub export: ExportSettings,
+    /// "Image format" dialog: (export waiting, size being chosen, keep the 6 : 4.2 ratio).
+    pub size_dialog: Option<(ImageExport, ImageSize, bool)>,
     /// Export Data page: settings (saved) and state (plan, running export).
     pub data_export: crate::export::data::DataExportConfig,
     pub dx: crate::ui::data_export::DataExportState,
@@ -359,6 +408,7 @@ impl App {
             task_rx,
             busy: None,
             export: ExportSettings::default(),
+            size_dialog: None,
             data_export: Default::default(),
             dx: Default::default(),
             next_id: 1,
@@ -839,7 +889,7 @@ impl App {
         };
         let mut cfg = p.cfg.clone();
         cfg.id = self.new_id();
-        cfg.name = format!("{} (copy)", cfg.name);
+        cfg.name = self.next_plot_name(&cfg.name);
         let id = cfg.id;
         self.plots.insert(
             i + 1,
@@ -851,6 +901,12 @@ impl App {
         );
         self.active = i + 1;
         self.push_undo(UndoAction::Added { id });
+    }
+
+    /// Name of a copy: the number of the name incremented ("Plot 3" →
+    /// "Plot 4", "S21" → "S21 2"), the first one not used by another plot.
+    fn next_plot_name(&self, name: &str) -> String {
+        next_free_name(name, |n| self.plots.iter().any(|p| p.cfg.name == n))
     }
 
     /// Moves a plot one place up (`-1`) or down (`+1`).
@@ -1284,9 +1340,29 @@ impl App {
     }
 
     fn render_options(&self, view: Option<[f64; 4]>) -> RenderOptions {
-        let mut o = RenderOptions::new(self.export.width, self.export.height);
+        let s = self.export.size;
+        let mut o = RenderOptions::physical(s.w_in, s.h_in, s.dpi as f32);
         o.view = view;
         o
+    }
+
+    /// Exports images (PowerPoint, PNG / SVG): directly in the 6 : 4.2
+    /// format, otherwise after asking the format.
+    pub fn request_image_export(&mut self, what: ImageExport) {
+        if self.export.ask_size || !self.export.size.standard_ratio() {
+            let keep = self.export.size.standard_ratio();
+            self.size_dialog = Some((what, self.export.size, keep));
+        } else {
+            self.run_image_export(what);
+        }
+    }
+
+    pub fn run_image_export(&mut self, what: ImageExport) {
+        match what {
+            ImageExport::Pptx => self.export_pptx_dialog(),
+            ImageExport::Images => self.export_images_dialog(),
+            ImageExport::Plot(i, fmt) => self.save_plot_image_dialog(i, fmt),
+        }
     }
 
     pub fn export_pptx_dialog(&mut self) {
@@ -1333,6 +1409,7 @@ impl App {
                         svg: with_svg.then(|| render_svg(&img_cfg, data, &fonts, o).into_bytes()),
                         img_w: o.width,
                         img_h: o.height,
+                        size_in: o.dpi.map(|d| (o.width as f64 / d as f64, o.height as f64 / d as f64)),
                         settings: plot_settings(cfg, data, src),
                     }),
                     Err(e) => {
@@ -1560,6 +1637,30 @@ pub fn write_dataset_csv(ds: &Dataset, rows: Option<&[u32]>, path: &Path) -> Res
     w.flush().map_err(|e| e.to_string())
 }
 
+/// `name` with its trailing number incremented until `used` says it is free.
+pub fn next_free_name(name: &str, used: impl Fn(&str) -> bool) -> String {
+    let name = name.trim();
+    // former copies: "Plot 3 (copy)" → "Plot 3"
+    let mut base = name;
+    while let Some(b) = base.strip_suffix("(copy)") {
+        base = b.trim_end();
+    }
+    let digits = base.len() - base.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+    // only a separate number counts: "Plot 3" → "Plot 4", but "S21" → "S21 2"
+    let stem = &base[..base.len() - digits];
+    let (stem, mut n) = match base[base.len() - digits..].parse::<u64>() {
+        Ok(n) if digits > 0 && stem.ends_with(' ') => (stem.to_owned(), n + 1),
+        _ => (format!("{base} "), 2),
+    };
+    loop {
+        let candidate = format!("{stem}{n}");
+        if !used(&candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
 /// File-name friendly version of a text.
 pub fn sanitize(s: &str) -> String {
     let t: String = s
@@ -1602,5 +1703,23 @@ impl eframe::App for App {
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_free_name;
+
+    #[test]
+    fn copies_are_numbered() {
+        let used = ["Plot 1", "Plot 2", "Plot 3", "S21", "S21 2"];
+        let f = |n: &str| next_free_name(n, |c| used.contains(&c));
+        assert_eq!(f("Plot 1"), "Plot 4");
+        assert_eq!(f("Plot 3"), "Plot 4");
+        assert_eq!(f("S21"), "S21 3");
+        assert_eq!(f("Gain"), "Gain 2");
+        assert_eq!(f("Plot 2 (copy)"), "Plot 4");
+        assert_eq!(f("Run9"), "Run9 2");
+        assert_eq!(f("12"), "12 2");
     }
 }

@@ -5,14 +5,14 @@ use std::sync::Arc;
 use egui::{Align2, Color32, FontId, RichText, Sense, Ui, Vec2};
 
 use super::{NAVY, section};
-use crate::app::App;
+use crate::app::{App, ImageExport, ImageSize};
 use crate::export::pptx::SlideFormat;
 use crate::plot::render::ImageFormat;
 use crate::plot::view::show_thumbnail;
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        ui.heading("Export");
+        ui.heading("Export Plots");
         ui.add_space(12.0);
         ui.label("Slide format:");
         egui::ComboBox::from_id_salt("slide_format")
@@ -24,19 +24,27 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             });
         ui.add_space(12.0);
         ui.label("Image size:");
-        ui.add(
-            egui::DragValue::new(&mut app.export.width)
-                .range(400..=6000)
-                .suffix(" px"),
-        );
-        ui.label("×");
-        ui.add(
-            egui::DragValue::new(&mut app.export.height)
-                .range(300..=6000)
-                .suffix(" px"),
-        );
+        size_editor(ui, &mut app.export.size, None);
+        if ui
+            .add_enabled(
+                app.export.size != ImageSize::STANDARD,
+                egui::Button::new("6 × 4.2").small(),
+            )
+            .on_hover_text("Standard format of the reports: 6 × 4.2 in, 300 dpi")
+            .clicked()
+        {
+            app.export.size = ImageSize::STANDARD;
+        }
+        ui.checkbox(&mut app.export.ask_size, "Ask at each export");
         ui.checkbox(&mut app.export.use_view, "Use the current zoom of each plot");
     });
+    if !app.export.size.standard_ratio() {
+        ui.label(
+            RichText::new("The size is not in the 6 : 4.2 ratio: the format will be asked at each export.")
+                .color(super::WARN)
+                .small(),
+        );
+    }
     ui.add_space(4.0);
 
     let fonts = Arc::clone(&app.fonts);
@@ -51,11 +59,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     let w = (avail - 12.0 * cols as f32) / cols as f32;
     // miniatures of the exported images: same proportions and same relative
     // text / line sizes as the PNG / SVG / slide images
-    let ew = app.export.width.max(1) as f32;
-    let eh = app.export.height.max(1) as f32;
+    let size = app.export.size;
+    let o = crate::plot::render::RenderOptions::physical(size.w_in, size.h_in, size.dpi as f32);
+    let (ew, eh) = (o.width.max(1) as f32, o.height.max(1) as f32);
     let h = (w * eh / ew).clamp(w * 0.3, w * 1.5);
-    let export_scale = crate::plot::render::RenderOptions::new(app.export.width, app.export.height).scale;
-    let thumb_scale = w / (ew / export_scale);
+    let thumb_scale = w / (ew / o.scale);
     let mut remove: Option<usize> = None;
     let mut open: Option<usize> = None;
     egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -168,7 +176,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 )
                 .clicked()
             {
-                app.export_pptx_dialog();
+                app.request_image_export(ImageExport::Pptx);
             }
             if ui
                 .add_enabled(
@@ -181,7 +189,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 )
                 .clicked()
             {
-                app.export_images_dialog();
+                app.request_image_export(ImageExport::Images);
             }
             if ui
                 .add_enabled(
@@ -197,9 +205,130 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
         });
         ui.label(
-            RichText::new("Each selected plot becomes one 16:9 slide (title + high resolution image, plus the plot settings in “Plot + Settings” format).")
+            RichText::new("Each selected plot becomes one 16:9 slide: title + the plot at its size (6 × 4.2 in by default), plus the plot settings in “Plot + Settings” format.")
                 .weak()
                 .small(),
         );
     });
+}
+
+/// Width × height (inches) and resolution of the images. `keep`: the height
+/// follows the width in the 6 : 4.2 ratio.
+fn size_editor(ui: &mut Ui, size: &mut ImageSize, keep: Option<&mut bool>) {
+    let keep_ratio = keep.as_ref().is_some_and(|k| **k);
+    let w = ui.add(
+        egui::DragValue::new(&mut size.w_in)
+            .range(1.0..=20.0)
+            .speed(0.05)
+            .max_decimals(2)
+            .suffix(" in"),
+    );
+    if w.changed() && keep_ratio {
+        size.h_in = (size.w_in / ImageSize::RATIO * 100.0).round() / 100.0;
+    }
+    ui.label("×");
+    let h = ui.add_enabled(
+        !keep_ratio,
+        egui::DragValue::new(&mut size.h_in)
+            .range(1.0..=20.0)
+            .speed(0.05)
+            .max_decimals(2)
+            .suffix(" in"),
+    );
+    let _ = h;
+    if let Some(k) = keep
+        && ui
+            .checkbox(k, "6 : 4.2")
+            .on_hover_text("Keep the 6 : 4.2 ratio")
+            .changed()
+        && *k
+    {
+        size.h_in = (size.w_in / ImageSize::RATIO * 100.0).round() / 100.0;
+    }
+    ui.add(
+        egui::DragValue::new(&mut size.dpi)
+            .range(72..=1200)
+            .speed(2.0)
+            .suffix(" dpi"),
+    );
+    let (pw, ph) = size.pixels();
+    ui.label(RichText::new(format!("{pw} × {ph} px")).weak().small());
+}
+
+/// "Image format" dialog shown before an export of images when the format
+/// is not the 6 : 4.2 one (or when "Ask at each export" is checked).
+pub fn size_dialog(app: &mut App, ctx: &egui::Context) {
+    let Some((what, mut size, mut keep)) = app.size_dialog else {
+        return;
+    };
+    let mut decision = None;
+    egui::Window::new("Image format")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+        .show(ctx, |ui| {
+            let what_text = match what {
+                ImageExport::Pptx => "PowerPoint report".to_owned(),
+                ImageExport::Images => format!("images ({})", app.export.image_format.ext().to_uppercase()),
+                ImageExport::Plot(_, f) => format!("{} image", f.ext().to_uppercase()),
+            };
+            ui.label(format!("Size of the plots of the {what_text}:"));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                for (label, s) in [
+                    ("6 × 4.2 in (standard)", ImageSize::STANDARD),
+                    (
+                        "8 × 5.6 in",
+                        ImageSize {
+                            w_in: 8.0,
+                            h_in: 5.6,
+                            dpi: size.dpi,
+                        },
+                    ),
+                    (
+                        "4 × 2.8 in",
+                        ImageSize {
+                            w_in: 4.0,
+                            h_in: 2.8,
+                            dpi: size.dpi,
+                        },
+                    ),
+                ] {
+                    if ui
+                        .selectable_label(size.w_in == s.w_in && size.h_in == s.h_in, label)
+                        .clicked()
+                    {
+                        size.w_in = s.w_in;
+                        size.h_in = s.h_in;
+                        keep = true;
+                    }
+                }
+            });
+            ui.horizontal(|ui| size_editor(ui, &mut size, Some(&mut keep)));
+            ui.checkbox(&mut app.export.ask_size, "Ask at each export");
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(egui::Button::new(RichText::new("Export").strong().color(Color32::WHITE)).fill(NAVY))
+                    .clicked()
+                {
+                    decision = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    decision = Some(false);
+                }
+            });
+        });
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        decision = Some(false);
+    }
+    match decision {
+        Some(true) => {
+            app.size_dialog = None;
+            app.export.size = size;
+            app.run_image_export(what);
+        }
+        Some(false) => app.size_dialog = None,
+        None => app.size_dialog = Some((what, size, keep)),
+    }
 }

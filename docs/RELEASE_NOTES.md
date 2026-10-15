@@ -12,6 +12,17 @@
 > Les étapes pour supprimer définitivement cet avertissement (signature de code) sont décrites dans `docs/SIGNATURE_WINDOWS.md`.
 > `SHA256SUMS.txt` donne l'empreinte de chaque fichier (vérification, liste blanche du service informatique).
 
+## Nouveautés de la version 0.4.1
+
+- **Images au format 6 × 4,2 in** (300 dpi, 1800 × 1260 px) pour les PNG, SVG et le PowerPoint : résolution écrite
+  dans les PNG, taille en pouces dans les SVG, graphes placés à 6 × 4,2 in sur les diapositives. Si la taille n'est
+  pas dans le rapport 6 : 4,2 (ou avec *Ask at each export*), le format est demandé au moment de l'export.
+- **Clic droit sur la légende** : police, taille, couleur, fond, bordure, masquer.
+- **Bouton thème clair / sombre** (🌙 / ☀) à gauche de QuickSave.
+- **Déplacement de la vue au bouton du milieu** de la souris maintenu, dans tous les modes ; **Échap** quitte le
+  mode *Zoom area*.
+- **Copies de graphes numérotées** : « Plot 3 » → « Plot 4 » au lieu de « (copy) ».
+
 ## Nouveautés de la version 0.4.0 — export des données
 
 - **Nouvelle page Export Data** : export des données de son choix en **CSV** et / ou **Touchstone `.s2p`**

@@ -25,6 +25,7 @@ pub const ERR: Color32 = Color32::from_rgb(190, 50, 50);
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     start::pending_switch_dialog(app, ui.ctx());
+    export_page::size_dialog(app, ui.ctx());
     if app.show_start {
         start::show(app, ui);
         preview_dropped_files(ui.ctx());
@@ -58,6 +59,15 @@ fn shortcuts(app: &mut App, ctx: &egui::Context) {
     // undo / redo of the plots (markers, deleted / added / moved plots); in a
     // text field, Ctrl+Z stays the text undo
     let typing = ctx.memory(|m| m.focused().is_some());
+    // Esc leaves the Zoom area mode (back to Pan)
+    if app.page == Page::Plots
+        && !typing
+        && app.box_zoom
+        && app.size_dialog.is_none()
+        && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+    {
+        app.box_zoom = false;
+    }
     if app.page == Page::Plots && !typing {
         let redo2 = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
         let redo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);
@@ -122,6 +132,20 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
                         .clicked()
                     {
                         app.save_workspace_dialog(false);
+                    }
+                    // light / dark theme
+                    let (icon, tip) = if app.dark {
+                        ("☀", "Light theme")
+                    } else {
+                        ("🌙", "Dark theme")
+                    };
+                    if ui
+                        .button(RichText::new(icon).size(15.0).color(Color32::WHITE))
+                        .on_hover_text(tip)
+                        .clicked()
+                    {
+                        app.dark = !app.dark;
+                        setup_style(ui.ctx(), app.dark);
                     }
                     if app.is_dirty_cached(ui.input(|i| i.time)) {
                         ui.label(

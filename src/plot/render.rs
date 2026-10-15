@@ -19,17 +19,59 @@ pub struct RenderOptions {
     pub scale: f32,
     /// Visible data range (xmin, xmax, ymin, ymax); `None` = configured / automatic.
     pub view: Option<[f64; 4]>,
+    /// Resolution (dots per inch) of an image with a physical size: written
+    /// in the PNG / SVG so that reports insert it at its size in inches.
+    pub dpi: Option<f32>,
 }
 
 impl RenderOptions {
+    #[cfg(test)]
     pub fn new(width: u32, height: u32) -> RenderOptions {
         RenderOptions {
             width,
             height,
             scale: (width.min(height * 16 / 10) as f32 / 1000.0).max(0.5),
             view: None,
+            dpi: None,
         }
     }
+
+    /// Image of `w_in` × `h_in` inches at `dpi`: texts and lines keep the
+    /// sizes they have on the screen (96 dpi), as in a 6 × 4.2 in figure.
+    pub fn physical(w_in: f32, h_in: f32, dpi: f32) -> RenderOptions {
+        let dpi = dpi.clamp(50.0, 1200.0);
+        RenderOptions {
+            width: (w_in * dpi).round().clamp(64.0, 8000.0) as u32,
+            height: (h_in * dpi).round().clamp(64.0, 8000.0) as u32,
+            scale: dpi / 96.0,
+            view: None,
+            dpi: Some(dpi),
+        }
+    }
+}
+
+/// Adds the resolution (pHYs chunk) to a PNG, after its header.
+fn png_with_dpi(png: Vec<u8>, dpi: f32) -> Vec<u8> {
+    // signature (8) + IHDR chunk (4 + 4 + 13 + 4)
+    const AFTER_IHDR: usize = 33;
+    if png.len() < AFTER_IHDR || &png[12..16] != b"IHDR" {
+        return png;
+    }
+    let ppm = (dpi as f64 / 0.0254).round() as u32;
+    let mut chunk = Vec::with_capacity(21);
+    chunk.extend_from_slice(&9u32.to_be_bytes());
+    let start = chunk.len();
+    chunk.extend_from_slice(b"pHYs");
+    chunk.extend_from_slice(&ppm.to_be_bytes());
+    chunk.extend_from_slice(&ppm.to_be_bytes());
+    chunk.push(1); // unit: metre
+    let crc = crate::export::zip::crc32(&chunk[start..]);
+    chunk.extend_from_slice(&crc.to_be_bytes());
+    let mut out = Vec::with_capacity(png.len() + chunk.len());
+    out.extend_from_slice(&png[..AFTER_IHDR]);
+    out.extend_from_slice(&chunk);
+    out.extend_from_slice(&png[AFTER_IHDR..]);
+    out
 }
 
 fn paint(c: Rgba) -> Paint<'static> {
@@ -967,7 +1009,16 @@ pub fn render_svg(cfg: &PlotConfig, data: &PlotData, fonts: &FontBook, opts: &Re
     let h = opts.height.clamp(64, 8000);
     let mut c = SvgCanvas::new(w, h);
     draw_plot(&mut c, cfg, data, fonts, opts, w, h);
-    c.finish()
+    let svg = c.finish();
+    match opts.dpi {
+        // physical size: the drawing keeps its pixel coordinates (viewBox)
+        Some(dpi) => svg.replacen(
+            &format!("width=\"{w}\" height=\"{h}\""),
+            &format!("width=\"{:.3}in\" height=\"{:.3}in\"", w as f32 / dpi, h as f32 / dpi),
+            1,
+        ),
+        None => svg,
+    }
 }
 
 /// Renders a plot to PNG bytes.
@@ -978,7 +1029,11 @@ pub fn render_png(
     opts: &RenderOptions,
 ) -> Result<Vec<u8>, String> {
     let pm = render(cfg, data, fonts, opts)?;
-    pm.encode_png().map_err(|e| format!("PNG encoding failed: {e}"))
+    let png = pm.encode_png().map_err(|e| format!("PNG encoding failed: {e}"))?;
+    Ok(match opts.dpi {
+        Some(dpi) => png_with_dpi(png, dpi),
+        None => png,
+    })
 }
 
 /// File format of the exported images.
@@ -1073,6 +1128,14 @@ mod tests {
     #[test]
     fn png_output() {
         let (cfg, data, fonts) = plot();
+        // 6 × 4.2 in at 300 dpi: 1800 × 1260 px, resolution in the PNG, inches in the SVG
+        let o = RenderOptions::physical(6.0, 4.2, 300.0);
+        assert_eq!((o.width, o.height), (1800, 1260));
+        let png = render_png(&cfg, &data, &fonts, &o).unwrap();
+        assert_eq!(&png[37..41], b"pHYs");
+        assert_eq!(u32::from_be_bytes(png[41..45].try_into().unwrap()), 11811);
+        let svg = render_svg(&cfg, &data, &fonts, &o);
+        assert!(svg.contains(r#"width="6.000in" height="4.200in" viewBox="0 0 1800 1260""#));
         let png = render_image(&cfg, &data, &fonts, &RenderOptions::new(400, 300), ImageFormat::Png).unwrap();
         assert_eq!(&png[1..4], b"PNG");
     }

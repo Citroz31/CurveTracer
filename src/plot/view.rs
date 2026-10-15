@@ -698,6 +698,12 @@ fn show_plot_impl(
                         [target_view[1], target_view[3]],
                     ));
                 }
+                // middle button held down: move the view, whatever the mouse mode
+                if interactive && !reset && pu.response().dragged_by(egui::PointerButton::Middle) {
+                    let d = pu.pointer_coordinate_drag_delta();
+                    pu.translate_bounds(-d);
+                    pu.ctx().set_cursor_icon(CursorIcon::Grabbing);
+                }
                 let b = if reset {
                     PlotBounds::from_min_max([target_view[0], target_view[2]], [target_view[1], target_view[3]])
                 } else {
@@ -1005,7 +1011,37 @@ fn show_plot_impl(
     let lresp = ui
         .interact(lrect, ui.id().with(("ct_legend", cfg.id)), Sense::click_and_drag())
         .on_hover_cursor(CursorIcon::Grab)
-        .on_hover_text("Drag to move the legend (drop it on an edge to place it outside the plot).\nClick an entry to show / hide the curve.");
+        .on_hover_text(
+            "Drag to move the legend (drop it on an edge to place it outside the plot).\nClick an entry to show / hide \
+             the curve.\nRight-click: font and size.",
+        );
+    lresp.context_menu(|ui| {
+        ui.label(egui::RichText::new("Legend font").strong());
+        crate::ui::font_editor(
+            ui,
+            &format!("legend_menu_{}", cfg.id),
+            &mut cfg.layout.legend.font,
+            fonts,
+        );
+        ui.horizontal(|ui| {
+            ui.label("Size");
+            for size in [9.0, 11.0, 13.0, 16.0, 20.0] {
+                if ui
+                    .selectable_label(cfg.layout.legend.font.size == size, format!("{size:.0}"))
+                    .clicked()
+                {
+                    cfg.layout.legend.font.size = size;
+                }
+            }
+        });
+        ui.separator();
+        ui.checkbox(&mut cfg.layout.legend.background, "Background");
+        ui.checkbox(&mut cfg.layout.legend.border, "Border");
+        if ui.button("Hide the legend").clicked() {
+            cfg.layout.legend.show = false;
+            ui.close();
+        }
+    });
     if lresp.drag_started() {
         let (fx, fy) = geom::to_free(fig_b, lb);
         cfg.layout.legend.position = LegendPos::Free { x: fx, y: fy };

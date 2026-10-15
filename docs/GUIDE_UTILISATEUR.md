@@ -1,6 +1,6 @@
 ---
 title: "CurveTracer — Guide utilisateur"
-subtitle: "Version 0.4.0"
+subtitle: "Version 0.4.1"
 ---
 
 # 1. Présentation
@@ -15,6 +15,13 @@ de façon rapide et interactive. Le principe :
 4. on **exporte** les graphes en PowerPoint, en images PNG / SVG ou en CSV
    (page *Export Plots*), et les **données** elles-mêmes en CSV ou en
    Touchstone `.s2p`, lissées ou non (page *Export Data*).
+
+Nouveautés de la version 0.4.1 : images exportées au format **6 × 4,2 in**
+(ou format demandé à l'export, § 8), police et taille de la légende par
+**clic droit** (§ 6), bouton **thème clair / sombre** 🌙 / ☀ à gauche de
+QuickSave, **déplacement de la vue au bouton du milieu** de la souris et
+**Échap** pour quitter le mode *Zoom area* (§ 6), copies de graphes
+numérotées (« Plot 3 » → « Plot 4 »).
 
 Nouveautés de la version 0.4.0 : page **Export Data** (§ 9) — export des
 données de son choix (après de-embedding) en **CSV** et / ou **`.s2p`**, sur
@@ -55,8 +62,9 @@ droite de la fenêtre :
 
 La barre du haut contient le menu **File** (ouvrir des fichiers, charger une
 police), le menu **📁 *nom du workspace*** (nouveau, ouvrir, récents,
-enregistrer, écran d'accueil), le menu **View** et le bouton **QuickSave**
-(précédé de « ● unsaved changes » quand il y a des modifications non
+enregistrer, écran d'accueil), le menu **View**, le bouton **🌙 / ☀**
+(thème sombre / clair) et le bouton **QuickSave** (précédé de « ● unsaved
+changes » quand il y a des modifications non
 enregistrées). La barre du bas affiche les messages (chargement terminé,
 erreurs…) et la mémoire utilisée.
 
@@ -228,7 +236,8 @@ que le graphe affiché). Comme les diapositives d'un PowerPoint :
 - **glisser-déposer** une carte : la déplace (une ligne bleue montre la
   position d'arrivée ; la liste défile si on approche du bord) ;
 - **clic droit** : *Duplicate (Copy / Split)*, *Move up / down*, *Move to
-  the top / bottom*, *Delete* ;
+  the top / bottom*, *Delete* ; la copie prend le numéro suivant (« Plot 3 »
+  → « Plot 4 », « S21 » → « S21 2 ») ;
 - clavier, souris sur la liste : **Suppr** supprime le graphe affiché,
   **Ctrl+D** le duplique ;
 - **Ctrl+Z** annule (un graphe supprimé revient à sa place), **Ctrl+Y**
@@ -401,6 +410,8 @@ Les polices proposées : *Proportional*, *Monospace*, et les polices installées
 | **Molette** | graphe **suivant / précédent** |
 | **Ctrl + molette** | zoom autour de la souris |
 | Glisser (clic gauche) | déplacer la vue (mode *Pan*) ou dessiner la zone à zoomer (mode *Zoom area*) |
+| **Bouton du milieu (molette) maintenu** + glisser | déplacer la vue, quel que soit le mode |
+| **Échap** | quitte le mode *Zoom area* (retour à *Pan*) |
 | Clic droit + glisser | zoom sur un rectangle |
 | Glisser sur un axe | zoom sur cet axe seulement |
 | **Clic sur un axe / le titre** | l'éditer (§ 6.1) |
@@ -426,7 +437,9 @@ Les polices proposées : *Proportional*, *Monospace*, et les polices installées
 elle passe **à l'extérieur du cadre** et le graphe se réduit automatiquement
 pour lui laisser la place. Un clic sur une entrée masque / affiche la courbe
 correspondante. Quand il y a beaucoup de courbes, la légende se répartit sur
-plusieurs colonnes.
+plusieurs colonnes. **Clic droit sur la légende** : police, taille (en
+saisie ou 9 / 11 / 13 / 16 / 20), couleur du texte, fond, bordure, ou
+masquer la légende.
 
 ![Légende placée à l'extérieur, curseur posé](screenshots/legend_out.png)
 
@@ -489,7 +502,17 @@ Exemples :
   double-clic ouvre le graphe.
 - **Slide format** : *Plot only* ou *Plot + Settings* (ajoute à droite la
   source, X, Y, séries, filtres et traitement).
-- **Image size** : résolution des images (1600 × 1000 par défaut).
+- **Image size** : taille des images en pouces et résolution — par défaut
+  **6 × 4,2 in à 300 dpi** (1800 × 1260 px), le format des rapports de test.
+  Les PNG portent leur résolution et les SVG leur taille en pouces : Word ou
+  PowerPoint les insèrent directement à 6 × 4,2 in ; dans le PowerPoint
+  exporté, chaque graphe est placé à cette taille. Textes et traits gardent
+  leur taille d'écran. Le bouton **6 × 4.2** revient au format standard.
+- **Format demandé à l'export** : si la taille n'est pas dans le rapport
+  **6 : 4,2**, ou si **Ask at each export** est coché, la fenêtre *Image
+  format* s'ouvre avant chaque export (PowerPoint, images, boutons PNG / SVG
+  de la page *Plots*) : formats 6 × 4,2 / 8 × 5,6 / 4 × 2,8 in, largeur ×
+  hauteur libres (case **6 : 4.2** pour garder le rapport), résolution.
 - **Images** : format des images exportées, **PNG** (bitmap) ou **SVG**
   (vectoriel : traits et textes nets à tous les zooms, textes modifiables).
 - **Vector (SVG) plots in the PowerPoint** (coché par défaut) : chaque
