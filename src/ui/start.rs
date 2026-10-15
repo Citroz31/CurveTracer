@@ -178,13 +178,14 @@ fn recent_list(app: &mut App, ui: &mut Ui, ctx: &egui::Context) {
             .max_height(430.0)
             .auto_shrink([false, true])
             .show(ui, |ui| {
+                let open_path = app
+                    .workspace_path
+                    .as_ref()
+                    .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()));
                 for (i, r) in app.recent.iter().enumerate() {
                     let exists = r.exists();
                     let bg = ui.painter().add(egui::Shape::Noop);
-                    let current = app
-                        .workspace_path
-                        .as_ref()
-                        .is_some_and(|p| std::fs::canonicalize(p).map(|c| c == r.path).unwrap_or(*p == r.path));
+                    let current = open_path.as_ref() == Some(&r.path);
                     let row = Frame::new()
                         .inner_margin(Margin::symmetric(10, 7))
                         .corner_radius(CornerRadius::same(6))
@@ -284,7 +285,11 @@ pub fn pending_switch_dialog(app: &mut App, ctx: &egui::Context) {
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
         .show(ctx, |ui| {
-            ui.label(format!("Save the changes of “{name}” before leaving it?"));
+            ui.label(if sw == Switch::Quit {
+                format!("Save the changes of “{name}” before closing CurveTracer?")
+            } else {
+                format!("Save the changes of “{name}” before leaving it?")
+            });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui.button(RichText::new("💾 Save").strong()).clicked() {

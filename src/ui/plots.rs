@@ -390,23 +390,38 @@ fn navigator(app: &mut App, ui: &mut Ui) {
             (dy, i.time)
         });
         if dy != 0.0 {
-            let (mut acc, last): (f32, f64) = ui.data(|d| d.get_temp(nav_id)).unwrap_or((0.0, f64::NEG_INFINITY));
-            if now - last < 0.28 {
-                acc = 0.0; // inertia of the previous move
-            } else {
-                acc += dy;
+            // (accumulated scroll, time of the last move, time of the last
+            // event, waiting for the end of the gesture)
+            let (mut acc, mut last_move, last_event, mut locked): (f32, f64, f64, bool) = ui
+                .data(|d| d.get_temp(nav_id))
+                .unwrap_or((0.0, f64::NEG_INFINITY, f64::NEG_INFINITY, false));
+            if now - last_event > 0.5 {
+                acc = 0.0; // small nudges long ago do not add up
             }
-            let mut last = last;
-            if acc.abs() >= 25.0 {
-                if acc < 0.0 && app.active + 1 < n {
-                    app.active += 1;
-                } else if acc > 0.0 && app.active > 0 {
-                    app.active -= 1;
+            if locked {
+                // a trackpad flick keeps sending (inertia) events: one move per
+                // gesture, until a short pause (or a long continuous scroll)
+                let pause = now - last_event > 0.12;
+                if pause || now - last_move > 0.6 {
+                    locked = false;
+                } else {
+                    acc = 0.0;
                 }
-                acc = 0.0;
-                last = now;
             }
-            ui.data_mut(|d| d.insert_temp(nav_id, (acc, last)));
+            if !locked {
+                acc += dy;
+                if acc.abs() >= 25.0 {
+                    if acc < 0.0 && app.active + 1 < n {
+                        app.active += 1;
+                    } else if acc > 0.0 && app.active > 0 {
+                        app.active -= 1;
+                    }
+                    acc = 0.0;
+                    last_move = now;
+                    locked = true;
+                }
+            }
+            ui.data_mut(|d| d.insert_temp(nav_id, (acc, last_move, now, locked)));
         }
     }
     let typing = ui.ctx().memory(|m| m.focused().is_some());

@@ -49,7 +49,11 @@ fn rect(b: Bx) -> Rect {
 pub struct PlotState {
     pub data: Option<Arc<PlotData>>,
     data_key: u64,
-    pending: Option<(u64, Receiver<PlotData>)>,
+    /// Settings part of `data_key` of the shown data (without the dataset
+    /// generation): new data for the same settings keeps the zoom.
+    cfg_key: u64,
+    /// (data key, settings key, result).
+    pending: Option<(u64, u64, Receiver<PlotData>)>,
     /// The view must be reset to the configured / automatic range.
     pub reset_view: bool,
     view_key: u64,
@@ -96,14 +100,18 @@ impl PlotState {
     /// Recomputes the traces in the background when the configuration or the
     /// data changed.
     pub fn update(&mut self, cfg: &PlotConfig, ds: Option<&Arc<Dataset>>, ctx: &egui::Context) {
-        if let Some((key, rx)) = &self.pending
+        if let Some((key, ck, rx)) = &self.pending
             && let Ok(d) = rx.try_recv()
         {
-            let key = *key;
+            let (key, ck) = (*key, *ck);
             self.pending = None;
+            // same settings, new data (reload, de-embedding, functions): keep the zoom
+            if ck != self.cfg_key || self.view.is_none() || self.data.as_ref().is_none_or(|d| d.error.is_some()) {
+                self.reset_view = true;
+            }
             self.data = Some(Arc::new(d));
             self.data_key = key;
-            self.reset_view = true;
+            self.cfg_key = ck;
         }
         let Some(ds) = ds else {
             if self.data_key != 1 {
@@ -115,7 +123,8 @@ impl PlotState {
             }
             return;
         };
-        let key = cfg.data_key() ^ ds.generation.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let ck = cfg.data_key();
+        let key = ck ^ ds.generation.wrapping_mul(0x9E37_79B9_7F4A_7C15);
         let vk = cfg.view_key();
         if vk != self.view_key {
             self.view_key = vk;
@@ -136,7 +145,7 @@ impl PlotState {
             let _ = tx.send(d);
             ctx.request_repaint();
         });
-        self.pending = Some((key, rx));
+        self.pending = Some((key, ck, rx));
     }
 
     /// Zooms in (factor < 1) or out (factor > 1) around the center of the view.
@@ -220,23 +229,30 @@ impl PlotState {
     pub fn wait_current(&mut self, cfg: &PlotConfig, ds: Option<&Arc<Dataset>>) {
         self.wait();
         if let Some(ds) = ds {
-            let key = cfg.data_key() ^ ds.generation.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            let ck = cfg.data_key();
+            let key = ck ^ ds.generation.wrapping_mul(0x9E37_79B9_7F4A_7C15);
             if key != self.data_key {
                 self.data = Some(Arc::new(compute(ds, cfg)));
                 self.data_key = key;
-                self.reset_view = true;
+                if ck != self.cfg_key {
+                    self.reset_view = true;
+                }
+                self.cfg_key = ck;
             }
         }
     }
 
     /// Blocks until the pending computation (if any) is done.
     pub fn wait(&mut self) {
-        if let Some((key, rx)) = self.pending.take()
+        if let Some((key, ck, rx)) = self.pending.take()
             && let Ok(d) = rx.recv()
         {
+            if ck != self.cfg_key {
+                self.reset_view = true;
+            }
             self.data = Some(Arc::new(d));
             self.data_key = key;
-            self.reset_view = true;
+            self.cfg_key = ck;
         }
     }
 }
@@ -335,6 +351,29 @@ fn step_spacer(step: f64, categorical: bool) -> impl Fn(GridInput) -> Vec<GridMa
 
 /// Points, color, width and dash pattern of a curve drawn with a custom pattern.
 type CustomPath = (Vec<[f64; 2]>, Color32, f32, Vec<f32>);
+
+/// Decimation of a curve that is not sorted by X (sweeps going back and
+/// forth): consecutive blocks of points are reduced to their lowest and
+/// highest points, in their original order.
+fn decimate_by_index(seg: &[[f64; 2]], buckets: usize, out: &mut Vec<[f64; 2]>) {
+    out.clear();
+    let size = seg.len().div_ceil(buckets.max(1)).max(1);
+    for block in seg.chunks(size) {
+        let (mut lo, mut hi) = (0, 0);
+        for (k, p) in block.iter().enumerate() {
+            if p[1] < block[lo][1] {
+                lo = k;
+            }
+            if p[1] > block[hi][1] {
+                hi = k;
+            }
+        }
+        out.push(block[lo.min(hi)]);
+        if lo != hi {
+            out.push(block[lo.max(hi)]);
+        }
+    }
+}
 
 /// Point budget of a thumbnail (plot list, Export page).
 const THUMB_POINTS: usize = 40_000;
@@ -643,6 +682,8 @@ pub fn show_plot(
                     for (si, seg) in t.segments.iter().enumerate() {
                         if t.sorted && decimate {
                             geom::decimate(seg, x0 - margin, x1 + margin, px_width * 2, &mut buf);
+                        } else if decimate && seg.len() > px_width * 16 {
+                            decimate_by_index(seg, px_width * 4, &mut buf);
                         } else {
                             buf.clear();
                             buf.extend_from_slice(seg);
@@ -661,6 +702,11 @@ pub fn show_plot(
                         if buf.is_empty() {
                             continue;
                         }
+                        let markers = s.marker != MarkerKind::None && buf.len() <= 50_000;
+                        // the points are moved (not copied) into the last item using them
+                        let take = |buf: &mut Vec<[f64; 2]>, last: bool| {
+                            if last { std::mem::take(buf) } else { buf.clone() }
+                        };
                         if s.line == LineKind::Custom {
                             // invisible line: hover read-out only
                             pu.line(
@@ -670,19 +716,19 @@ pub fn show_plot(
                                     .color(Color32::from_black_alpha(1))
                                     .width(0.0),
                             );
-                            custom.push((buf.clone(), color, s.width, s.dash.clone()));
+                            custom.push((take(&mut buf, !markers), color, s.width, s.dash.clone()));
                         } else if s.line != LineKind::None {
                             pu.line(
-                                Line::new(s.label.clone(), PlotPoints::new(buf.clone()))
+                                Line::new(s.label.clone(), PlotPoints::new(take(&mut buf, !markers)))
                                     .id(Id::new(("ct_line", ti, si)))
                                     .color(color)
                                     .width(s.width)
                                     .style(line_style(s.line, s.width)),
                             );
                         }
-                        if s.marker != MarkerKind::None && buf.len() <= 50_000 {
+                        if markers {
                             pu.points(
-                                Points::new(s.label.clone(), PlotPoints::new(buf.clone()))
+                                Points::new(s.label.clone(), PlotPoints::new(std::mem::take(&mut buf)))
                                     .id(Id::new(("ct_pts", ti, si)))
                                     .color(color)
                                     .shape(marker_shape(s.marker))

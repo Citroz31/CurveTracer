@@ -13,6 +13,10 @@ pub struct RecentWorkspace {
     pub path: PathBuf,
     /// Last time it was opened / saved (seconds since 1970).
     pub last: u64,
+    /// The file exists (checked when the list is loaded, not at every frame:
+    /// a disconnected network drive can block for seconds).
+    #[serde(skip)]
+    pub found: bool,
 }
 
 impl RecentWorkspace {
@@ -24,7 +28,7 @@ impl RecentWorkspace {
     }
 
     pub fn exists(&self) -> bool {
-        self.path.is_file()
+        self.found
     }
 }
 
@@ -78,6 +82,9 @@ pub fn load() -> Vec<RecentWorkspace> {
         .map(|r| r.workspaces)
         .unwrap_or_default();
     list.sort_by_key(|r| std::cmp::Reverse(r.last));
+    for r in &mut list {
+        r.found = r.path.is_file();
+    }
     list
 }
 
@@ -105,7 +112,14 @@ fn same(a: &Path, b: &Path) -> bool {
 pub fn touch(list: &mut Vec<RecentWorkspace>, path: &Path) {
     list.retain(|r| !same(&r.path, path));
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    list.insert(0, RecentWorkspace { path, last: now() });
+    list.insert(
+        0,
+        RecentWorkspace {
+            path,
+            last: now(),
+            found: true,
+        },
+    );
     list.truncate(MAX_RECENT);
     save(list);
 }
@@ -152,6 +166,7 @@ mod tests {
         let r = RecentWorkspace {
             path: PathBuf::from("/a/b/My project.ctw"),
             last: 0,
+            found: false,
         };
         assert_eq!(r.name(), "My project");
         assert!(!r.exists());

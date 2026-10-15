@@ -19,7 +19,7 @@ fn col_width(c: &Column, rows: &[usize]) -> f32 {
 pub fn data_table(ui: &mut Ui, id: Id, ds: &Dataset, rows: Option<&[u32]>, cols: &[usize]) {
     let n = rows.map_or(ds.n_rows, |r| r.len());
     let row_index = |i: usize| -> usize { rows.map_or(i, |r| r[i] as usize) };
-    let sample: Vec<usize> = (0..n.min(64)).map(row_index).collect();
+    let sample: Vec<usize> = (0..n.min(64)).map(row_index).filter(|&r| r < ds.n_rows).collect();
     let widths: Vec<f32> = cols.iter().map(|&c| col_width(&ds.columns[c], &sample)).collect();
     let idx_w = ((n.max(1) as f32).log10().floor() + 1.0) * 8.0 + 16.0;
     let total_w = idx_w + widths.iter().sum::<f32>();
@@ -89,7 +89,8 @@ pub fn data_table(ui: &mut Ui, id: Id, ds: &Dataset, rows: Option<&[u32]>, cols:
                     for i in range {
                         let r_idx = row_index(i);
                         let (rect, _) = ui.allocate_exact_size(Vec2::new(total_w, ROW_H), Sense::hover());
-                        if !ui.is_rect_visible(rect) {
+                        // (rows of an older version of the data: skipped)
+                        if r_idx >= ds.n_rows || !ui.is_rect_visible(rect) {
                             continue;
                         }
                         let p = ui.painter_at(rect);

@@ -42,6 +42,8 @@ pub struct PlotData {
     pub compute_ms: f64,
     /// Whether original traces are shown next to aggregated ones.
     pub has_aggregates_and_originals: bool,
+    /// Generation of the dataset the rows refer to.
+    pub generation: u64,
 }
 
 impl PlotData {
@@ -582,6 +584,7 @@ pub fn compute(ds: &Dataset, cfg: &PlotConfig) -> PlotData {
         total_points: total,
         compute_ms: t0.elapsed().as_secs_f64() * 1000.0,
         has_aggregates_and_originals: has_both,
+        generation: ds.generation,
     }
 }
 

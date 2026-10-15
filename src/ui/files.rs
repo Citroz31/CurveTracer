@@ -415,6 +415,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         if s.loading {
                             ui.spinner();
                             ui.label("Loading…");
+                        } else if s.rebuilding {
+                            ui.spinner();
+                            ui.label("Updating…");
                         }
                         if let Some(ds) = &s.ds {
                             chip(ui, format!("{} rows", thousands(ds.n_rows)));

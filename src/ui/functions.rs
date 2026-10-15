@@ -48,6 +48,9 @@ fn page(app: &mut App, ui: &mut Ui) {
                     ui.label("");
                     ui.end_row();
                 }
+                // leaving a field recomputes only when something was edited
+                // (a recomputation resets the zoom of every plot)
+                let was_dirty = app.func_dirty;
                 for i in 0..app.functions.len() {
                     let f = &mut app.functions[i];
                     changed |= ui.checkbox(&mut f.enabled, "").changed();
@@ -57,7 +60,7 @@ fn page(app: &mut App, ui: &mut Ui) {
                             .hint_text("Column name"),
                     );
                     dirty |= r.changed();
-                    changed |= r.lost_focus();
+                    changed |= r.lost_focus() && (was_dirty || dirty);
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut f.expr)
                             .desired_width(380.0)
@@ -65,7 +68,7 @@ fn page(app: &mut App, ui: &mut Ui) {
                             .hint_text("e.g. [Freq] / 1e9"),
                     );
                     dirty |= r.changed();
-                    changed |= r.lost_focus();
+                    changed |= r.lost_focus() && (was_dirty || dirty);
                     // status over all sources
                     let mut ok = 0;
                     let mut errors: Vec<String> = Vec::new();

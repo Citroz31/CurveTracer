@@ -1,6 +1,6 @@
 ---
 title: "CurveTracer — Guide utilisateur"
-subtitle: "Version 0.3.2"
+subtitle: "Version 0.3.3"
 ---
 
 # 1. Présentation
@@ -488,7 +488,8 @@ d'origine.
 - **Enregistrer** : **QuickSave**, **Ctrl+S** ou **📁 → Save** ; **📁 → Save
   as…** pour une copie sous un autre nom.
 - **Changer de workspace** : si le workspace courant a des modifications non
-  enregistrées, CurveTracer propose **Save**, **Don't save** ou **Cancel**.
+  enregistrées, CurveTracer propose **Save**, **Don't save** ou **Cancel**
+  (de même à la **fermeture de la fenêtre**).
 
 Astuce : associer l'extension `.ctw` à `CurveTracer.exe` dans Windows permet
 d'ouvrir un projet par double-clic.

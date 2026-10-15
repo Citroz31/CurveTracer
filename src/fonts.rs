@@ -19,6 +19,8 @@ pub struct FontFace {
     pub font: FontArc,
     pub path: Option<PathBuf>,
     pub builtin: bool,
+    /// Loaded by the user (File → Load a font file / workspace), not a system font.
+    pub user: bool,
 }
 
 #[derive(Clone)]
@@ -94,6 +96,7 @@ impl FontBook {
                     font,
                     path: None,
                     builtin: true,
+                    user: false,
                 });
             }
         }
@@ -107,7 +110,7 @@ impl FontBook {
             'files: for file in *files {
                 for d in &dirs {
                     let p = d.join(file);
-                    if p.is_file() && self.add_file_named(&p, name).is_ok() {
+                    if p.is_file() && self.add_file_named(&p, name, false).is_ok() {
                         break 'files;
                     }
                 }
@@ -121,11 +124,12 @@ impl FontBook {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Font".to_owned());
-        self.add_file_named(path, &stem)
+        self.add_file_named(path, &stem, true)
     }
 
-    fn add_file_named(&mut self, path: &Path, name: &str) -> Result<String, String> {
-        if let Some(f) = self.faces.iter().find(|f| f.name == name) {
+    fn add_file_named(&mut self, path: &Path, name: &str, user: bool) -> Result<String, String> {
+        if let Some(f) = self.faces.iter_mut().find(|f| f.name == name) {
+            f.user |= user;
             return Ok(f.name.clone());
         }
         let bytes = std::fs::read(path).map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
@@ -137,6 +141,7 @@ impl FontBook {
             font,
             path: Some(path.to_path_buf()),
             builtin: false,
+            user,
         });
         Ok(name.to_owned())
     }

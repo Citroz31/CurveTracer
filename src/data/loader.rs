@@ -466,6 +466,24 @@ pub(crate) fn merge_column(name: String, parts: Vec<ColBuilder<'_>>, decimal_com
         }
         gdict.iter().map(|b| decode_text(b)).collect()
     };
+    // Same rule as the chunks that switched to numbers, whatever the number of
+    // chunks (= of CPU cores): many distinct numbers with a few text markers
+    // ("N/A", "FAIL") → numeric column, the markers being missing values.
+    if dict.len() > NUMERIC_SWITCH {
+        let nums: Vec<f64> = dict
+            .iter()
+            .map(|d| parse_number(d, decimal_comma).unwrap_or(f64::NAN))
+            .collect();
+        let n_text = dict
+            .iter()
+            .zip(&nums)
+            .filter(|(d, v)| v.is_nan() && !d.trim().is_empty())
+            .count();
+        if (1..=MAX_TEXTS_IN_NUMERIC).contains(&n_text) {
+            let values = codes.iter().map(|&c| nums[c as usize]).collect();
+            return Column::from_values(name, values, None);
+        }
+    }
     Column::from_dict(name, codes, dict, decimal_comma)
 }
 
@@ -711,6 +729,14 @@ pub(crate) struct HeaderGuess {
 
 /// Header detection on decoded sample records (blank records included).
 pub(crate) fn detect_header(samples: &[Vec<String>], forced: Option<usize>) -> HeaderGuess {
+    if samples.is_empty() {
+        // empty file / sheet: "no column" is reported by the caller
+        return HeaderGuess {
+            header: None,
+            first_data: 0,
+            n_cols: 0,
+        };
+    }
     let eff: Vec<usize> = samples.iter().map(|f| effective_count(f)).collect();
     let max_after = |from: usize| eff.iter().skip(from).copied().max().unwrap_or(0);
     if let Some(line) = forced {
@@ -1249,6 +1275,42 @@ Data Timestamp,RunID,SN,Set_TempC,Freq,S21db,Comment\n\
             };
             assert_eq!(note.text(i), expected, "row {i}");
         }
+    }
+
+    #[test]
+    fn empty_input_with_forced_header() {
+        // empty Excel sheet + "header line 3": no panic, just "no column"
+        let g = detect_header(&[], Some(3));
+        assert_eq!(g.n_cols, 0);
+        let opts = ImportOptions {
+            header_line: Some(3),
+            ..Default::default()
+        };
+        assert!(parse_csv(b"\n\n", &opts).is_err());
+    }
+
+    #[test]
+    fn column_type_does_not_depend_on_chunks() {
+        // 6000 distinct numbers + 2 markers: numeric whatever the chunking
+        let mut text = String::from("V\n");
+        for i in 0..6000 {
+            text.push_str(&format!("{}\n", i as f64 + 0.5));
+        }
+        text.push_str("FAIL\nN/A\n");
+        let one = parse_chunk(text.as_bytes().split_at(2).1, b',', 1, false);
+        let col = merge_column("V".into(), one, false);
+        assert_eq!(col.kind, ColumnKind::Numeric);
+        // the same rows in 4 chunks of < 4096 distinct values (no switch)
+        let body = text.as_bytes().split_at(2).1;
+        let parts: Vec<ColBuilder<'_>> = split_chunks(body, 4)
+            .into_iter()
+            .flat_map(|c| parse_chunk(c, b',', 1, false))
+            .collect();
+        assert!(parts.iter().all(|p| p.values.is_none()));
+        let col4 = merge_column("V".into(), parts, false);
+        assert_eq!(col4.kind, ColumnKind::Numeric);
+        assert_eq!(col4.len(), 6002);
+        assert!(col4.value(6000).is_nan() && col4.value(5999) == 5999.5);
     }
 
     #[test]

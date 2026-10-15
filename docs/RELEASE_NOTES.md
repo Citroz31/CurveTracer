@@ -10,6 +10,18 @@
 > Au premier lancement, Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » (exécutable non signé) :
 > **Informations complémentaires → Exécuter quand même**.
 
+## Nouveautés de la version 0.3.3 — fiabilité
+
+- **Plantage corrigé** : l'onglet *View Data* pouvait fermer l'application après le rechargement d'un fichier plus court.
+- **Plantage corrigé** : une feuille Excel vide avec ligne d'en-tête forcée bloquait le chargement (« Loading… » sans fin) et désactivait la détection des modifications ; tout incident de lecture est maintenant signalé comme une erreur.
+- **Fermeture de la fenêtre** : CurveTracer propose d'enregistrer les modifications (*Save / Don't save / Cancel*).
+- Le type d'une colonne ne dépend plus du nombre de cœurs du PC (même résultat partout pour un même fichier).
+- Supprimer un graphe placé au-dessus du graphe affiché ne change plus de graphe.
+- De-embedding et fonctions utilisateur recalculés **en tâche de fond** (plus de gel de la fenêtre sur les gros fichiers) ; un rechargement / de-embedding / changement de fonction **garde le zoom** des graphes.
+- Quitter un champ de fonction sans l'avoir modifié ne recalcule plus tous les graphes.
+- Trackpad : un geste = un graphe (l'inertie ne fait plus sauter plusieurs graphes).
+- Polices chargées par l'utilisateur propres à chaque workspace ; écran d'accueil sans accès disque à chaque image ; mémoire de la barre d'état mise en cache ; grosses courbes non triées décimées à l'affichage.
+
 ## Nouveautés de la version 0.3.2
 
 - **Lissage des courbes** (Data → Process Data → *Smoothing*) : moyenne glissante, gaussien, **Savitzky–Golay**, médiane (anti-pics), exponentiel sans déphasage, moyenne sur une largeur en X ;

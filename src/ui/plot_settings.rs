@@ -788,6 +788,14 @@ fn view_data(app: &mut App, ui: &mut Ui) {
         ui.label("No data");
         return;
     };
+    if data.error.is_none() && data.generation != ds.generation {
+        // the data source was reloaded: the rows will be recomputed
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label("Updating…");
+        });
+        return;
+    }
     ui.horizontal(|ui| {
         ui.label(format!("{} rows match the filters", thousands(data.rows.len())));
         ui.checkbox(&mut entry.ui.view_all_columns, "All columns");

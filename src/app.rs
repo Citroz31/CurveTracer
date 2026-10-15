@@ -41,41 +41,60 @@ pub struct DataSource {
     pub ds: Option<Arc<Dataset>>,
     pub func_errors: Vec<Option<String>>,
     pub loading: bool,
+    /// De-embedding / user functions being recomputed in the background.
+    pub rebuilding: bool,
+    /// Number of the latest rebuild (older results are dropped).
+    rebuild_ticket: u64,
     pub error: Option<String>,
     pub show_options: bool,
     pub show_deembed: bool,
 }
 
+/// Result of a background rebuild: base → de-embedding → user functions.
+struct RebuildMsg {
+    key: String,
+    ticket: u64,
+    deembedded: Option<Arc<Dataset>>,
+    report: Option<Result<DeembedReport, String>>,
+    ds: Dataset,
+    func_errors: Vec<Option<String>>,
+    /// Show the de-embedding result in the status bar.
+    announce: bool,
+}
+
+/// De-embedding result: (de-embedded base, report).
+type Deembedded = (Option<Arc<Dataset>>, Option<Result<DeembedReport, String>>);
+/// (de-embedded base, report, dataset with the functions, function errors).
+type Rebuilt = (
+    Option<Arc<Dataset>>,
+    Option<Result<DeembedReport, String>>,
+    Dataset,
+    Vec<Option<String>>,
+);
+
+/// De-embedding (when `redo`, else the previous result is kept) then user functions.
+fn rebuild(
+    base: &Arc<Dataset>,
+    deembed_cfg: &DeembedConfig,
+    redo: bool,
+    previous: Deembedded,
+    funcs: &[UserFunction],
+) -> Rebuilt {
+    let (deembedded, report) = if !redo {
+        previous
+    } else if !deembed_cfg.is_active() {
+        (None, None)
+    } else {
+        match deembed::apply(base, deembed_cfg) {
+            Ok((ds, report)) => (Some(Arc::new(ds)), Some(Ok(report))),
+            Err(e) => (None, Some(Err(e))),
+        }
+    };
+    let (ds, errors) = with_functions(deembedded.as_ref().unwrap_or(base), funcs);
+    (deembedded, report, ds, errors)
+}
+
 impl DataSource {
-    /// Re-applies the de-embedding (reads the fixture files again).
-    pub fn update_deembed(&mut self) {
-        self.deembedded = None;
-        self.deembed_report = None;
-        let Some(base) = &self.base else {
-            return;
-        };
-        if !self.deembed.is_active() {
-            return;
-        }
-        match deembed::apply(base, &self.deembed) {
-            Ok((ds, report)) => {
-                self.deembedded = Some(Arc::new(ds));
-                self.deembed_report = Some(Ok(report));
-            }
-            Err(e) => self.deembed_report = Some(Err(e)),
-        }
-    }
-
-    /// Rebuilds the dataset: base → de-embedding → user functions.
-    pub fn update_functions(&mut self, funcs: &[UserFunction]) {
-        let Some(base) = self.deembedded.as_ref().or(self.base.as_ref()) else {
-            return;
-        };
-        let (ds, errors) = with_functions(base, funcs);
-        self.ds = Some(Arc::new(ds));
-        self.func_errors = errors;
-    }
-
     pub fn name(&self) -> String {
         self.path
             .file_name()
@@ -182,6 +201,8 @@ pub enum Switch {
     OpenDialog,
     /// Back to the start screen (to create or open another workspace).
     Close,
+    /// Close the application window.
+    Quit,
 }
 
 /// State of the start screen.
@@ -232,6 +253,10 @@ pub struct App {
     pub status: Option<Status>,
     load_tx: Sender<LoadMsg>,
     load_rx: Receiver<LoadMsg>,
+    rebuild_tx: Sender<RebuildMsg>,
+    rebuild_rx: Receiver<RebuildMsg>,
+    /// To wake the UI up when a background job is done.
+    repaint: Context,
     task_tx: Sender<TaskMsg>,
     task_rx: Receiver<TaskMsg>,
     pub busy: Option<String>,
@@ -247,6 +272,10 @@ pub struct App {
     /// Take the snapshot once the data sources are loaded.
     snapshot_pending: bool,
     pub pending_switch: Option<Switch>,
+    /// The user confirmed closing the window.
+    quitting: bool,
+    /// (datasets key, memory used).
+    mem_cache: std::cell::Cell<(u64, usize)>,
     /// Plots page: left-drag draws a zoom rectangle instead of panning.
     pub box_zoom: bool,
     /// (time, result) of the last change detection (it serializes the workspace).
@@ -281,6 +310,7 @@ impl App {
         let mut fonts = FontBook::new(epaint_default_fonts::UBUNTU_LIGHT, epaint_default_fonts::HACK_REGULAR);
         fonts.scan_system();
         let (load_tx, load_rx) = channel();
+        let (rebuild_tx, rebuild_rx) = channel();
         let (task_tx, task_rx) = channel();
         let mut app = App {
             sources: Vec::new(),
@@ -296,6 +326,9 @@ impl App {
             status: None,
             load_tx,
             load_rx,
+            rebuild_tx,
+            rebuild_rx,
+            repaint: ctx.clone(),
             task_tx,
             task_rx,
             busy: None,
@@ -312,6 +345,8 @@ impl App {
             saved_snapshot: None,
             snapshot_pending: false,
             pending_switch: None,
+            quitting: false,
+            mem_cache: std::cell::Cell::new((u64::MAX, 0)),
             box_zoom: false,
             dirty_check: std::cell::Cell::new((f64::NEG_INFINITY, false)),
             import_defaults: ImportOptions::default(),
@@ -416,6 +451,8 @@ impl App {
                 ds: None,
                 func_errors: Vec::new(),
                 loading: true,
+                rebuilding: false,
+                rebuild_ticket: 0,
                 error: None,
                 show_options: false,
                 show_deembed: false,
@@ -430,7 +467,9 @@ impl App {
         let tx = self.load_tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = load_path(&path, &opts);
+            // a panic in a loader must not leave the source "Loading…" forever
+            let result = std::panic::catch_unwind(|| load_path(&path, &opts))
+                .unwrap_or_else(|_| Err(format!("Cannot read {}: unexpected file content", path.display())));
             let _ = tx.send(LoadMsg { key, result });
             ctx.request_repaint();
         });
@@ -445,25 +484,51 @@ impl App {
 
     /// Applies the de-embedding settings of a data source.
     pub fn apply_deembed(&mut self, i: usize) {
+        self.start_rebuild(i, true, true);
+    }
+
+    /// Recomputes the de-embedding (`redo`) and the user functions of a data
+    /// source in the background; the current dataset stays usable meanwhile.
+    fn start_rebuild(&mut self, i: usize, redo: bool, announce: bool) {
         let Some(s) = self.sources.get_mut(i) else {
             return;
         };
-        s.update_deembed();
-        s.update_functions(&self.functions);
-        let msg = match &s.deembed_report {
-            Some(Ok(r)) => Some((format!("{}: {}", s.name(), r.summary()), false)),
-            Some(Err(e)) => Some((format!("{}: {e}", s.name()), true)),
-            None => None,
+        let Some(base) = s.base.clone() else {
+            return;
         };
-        match msg {
-            Some((t, err)) => self.set_status(t, err),
-            None => self.set_status(format!("{}: de-embedding off", self.sources[i].name()), false),
-        }
+        s.rebuild_ticket += 1;
+        s.rebuilding = true;
+        let ticket = s.rebuild_ticket;
+        let key = s.key.clone();
+        let cfg = s.deembed.clone();
+        let previous = (s.deembedded.clone(), s.deembed_report.clone());
+        let funcs = self.functions.clone();
+        let tx = self.rebuild_tx.clone();
+        let ctx = self.repaint.clone();
+        std::thread::spawn(move || {
+            let (deembedded, report, ds, func_errors) = rebuild(&base, &cfg, redo, previous, &funcs);
+            let _ = tx.send(RebuildMsg {
+                key,
+                ticket,
+                deembedded,
+                report,
+                ds,
+                func_errors,
+                announce,
+            });
+            ctx.request_repaint();
+        });
     }
 
     pub fn remove_source(&mut self, i: usize) {
         if i < self.sources.len() {
             self.sources.remove(i);
+            if i < self.data_page.source {
+                self.data_page.source -= 1;
+            }
+        }
+        if self.data_page.source >= self.sources.len() {
+            self.data_page.source = self.sources.len().saturating_sub(1);
         }
     }
 
@@ -538,8 +603,8 @@ impl App {
 
     /// Recomputes the user function columns of every data source.
     pub fn apply_functions(&mut self) {
-        for s in &mut self.sources {
-            s.update_functions(&self.functions);
+        for i in 0..self.sources.len() {
+            self.start_rebuild(i, false, false);
         }
         self.func_dirty = false;
     }
@@ -565,9 +630,11 @@ impl App {
                         s.options.sheet = Some(sheet.clone());
                     }
                     s.base = Some(Arc::new(ds));
-                    s.update_deembed();
-                    s.update_functions(&self.functions);
                     s.error = None;
+                    let key = msg.key.clone();
+                    if let Some(i) = self.sources.iter().position(|x| x.key == key) {
+                        self.start_rebuild(i, true, false);
+                    }
                     self.status = Some(Status {
                         text,
                         error: false,
@@ -584,7 +651,29 @@ impl App {
                 }
             }
         }
-        if self.snapshot_pending && self.sources.iter().all(|s| !s.loading) {
+        while let Ok(msg) = self.rebuild_rx.try_recv() {
+            let Some(s) = self.sources.iter_mut().find(|s| s.key == msg.key) else {
+                continue;
+            };
+            if msg.ticket != s.rebuild_ticket {
+                continue; // settings changed meanwhile: a newer rebuild is running
+            }
+            s.rebuilding = false;
+            s.deembedded = msg.deembedded;
+            s.deembed_report = msg.report;
+            s.ds = Some(Arc::new(msg.ds));
+            s.func_errors = msg.func_errors;
+            if msg.announce {
+                let name = s.name();
+                let (t, err) = match &s.deembed_report {
+                    Some(Ok(r)) => (format!("{name}: {}", r.summary()), false),
+                    Some(Err(e)) => (format!("{name}: {e}"), true),
+                    None => (format!("{name}: de-embedding off"), false),
+                };
+                self.set_status(t, err);
+            }
+        }
+        if self.snapshot_pending && self.sources.iter().all(|s| !s.loading && !s.rebuilding) {
             self.snapshot_pending = false;
             self.saved_snapshot = Some(self.snapshot());
         }
@@ -629,12 +718,28 @@ impl App {
         }
     }
 
+    /// Memory used by the data (status bar): recomputed only when a dataset
+    /// changes (it walks every dictionary).
     pub fn memory_bytes(&self) -> usize {
-        self.sources
+        let key = self
+            .sources
+            .iter()
+            .filter_map(|s| s.ds.as_ref())
+            .fold(self.sources.len() as u64, |k, d| {
+                k.wrapping_mul(0x100_0000_01B3) ^ d.generation
+            });
+        let (k, v) = self.mem_cache.get();
+        if k == key {
+            return v;
+        }
+        let v = self
+            .sources
             .iter()
             .filter_map(|s| s.ds.as_ref())
             .map(|d| d.memory_bytes())
-            .sum()
+            .sum();
+        self.mem_cache.set((key, v));
+        v
     }
 
     // ---- plots ----------------------------------------------------------------
@@ -725,6 +830,10 @@ impl App {
     pub fn remove_plot(&mut self, i: usize) {
         if i < self.plots.len() {
             self.plots.remove(i);
+            // the shown plot stays shown when a plot above it is deleted
+            if i < self.active {
+                self.active -= 1;
+            }
         }
         if self.active >= self.plots.len() {
             self.active = self.plots.len().saturating_sub(1);
@@ -757,7 +866,7 @@ impl App {
                 .fonts
                 .faces
                 .iter()
-                .filter(|f| !f.builtin)
+                .filter(|f| f.user)
                 .filter_map(|f| f.path.clone())
                 .collect(),
         }
@@ -921,6 +1030,12 @@ impl App {
 
     /// Empties the project (data sources, plots, functions).
     fn reset_project(&mut self) {
+        // fonts loaded from files belong to the workspace that loaded them
+        if self.fonts.faces.iter().any(|f| f.user) {
+            let mut book = (*self.fonts).clone();
+            book.faces.retain(|f| !f.user);
+            self.fonts = Arc::new(book);
+        }
         self.sources.clear();
         self.plots.clear();
         self.functions.clear();
@@ -954,6 +1069,10 @@ impl App {
                 self.reset_project();
                 self.recent = crate::recent::load();
                 self.show_start = true;
+            }
+            Switch::Quit => {
+                self.quitting = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
     }
@@ -1303,6 +1422,11 @@ pub fn sanitize(s: &str) -> String {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // closing the window with unsaved changes: ask first
+        if ctx.input(|i| i.viewport().close_requested()) && !self.quitting && self.is_dirty() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.pending_switch = Some(Switch::Quit);
+        }
         self.poll();
         self.handle_dropped_files(&ctx);
         if self.fonts_installed != self.fonts.faces.len() {
@@ -1311,7 +1435,7 @@ impl eframe::App for App {
         self.update_plots(&ctx);
         crate::ui::show(self, ui);
         if self.busy.is_some()
-            || self.sources.iter().any(|s| s.loading)
+            || self.sources.iter().any(|s| s.loading || s.rebuilding)
             || self.plots.iter().any(|p| p.state.is_computing())
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
