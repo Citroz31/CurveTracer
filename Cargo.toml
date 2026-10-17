@@ -18,7 +18,7 @@ winresource = "0.1"
 # GUI. Only the graphics backend of each system is compiled (DirectX 12 on
 # Windows, which also runs without a GPU driver through its software
 # renderer; Metal on macOS; Vulkan / OpenGL ES on Linux) and the
-# accessibility layer is left out: the executable is 25 % smaller. OpenGL
+# accessibility layer is left out: the executable is 30 % smaller. OpenGL
 # alone (glow) would be smaller still but does not start on PCs without a
 # GPU driver (virtual machines, Remote Desktop).
 eframe = { version = "0.36", default-features = false, features = [
@@ -60,6 +60,39 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
+
+# Crates that only work at start-up (shader translation) or very little per
+# frame (window events, GPU submission, file dialogs) are optimized for size;
+# the data, plot and export code above keeps the full speed (opt-level 3).
+[profile.release.package.naga]
+opt-level = "s"
+
+[profile.release.package.wgpu-core]
+opt-level = "s"
+
+[profile.release.package.wgpu-hal]
+opt-level = "s"
+
+[profile.release.package.wgpu]
+opt-level = "s"
+
+[profile.release.package.wgpu-types]
+opt-level = "s"
+
+[profile.release.package.egui-wgpu]
+opt-level = "s"
+
+[profile.release.package.codespan-reporting]
+opt-level = "s"
+
+[profile.release.package.rfd]
+opt-level = "s"
+
+[profile.release.package.winit]
+opt-level = "s"
+
+[profile.release.package.egui-winit]
+opt-level = "s"
 
 [profile.dev]
 opt-level = 1

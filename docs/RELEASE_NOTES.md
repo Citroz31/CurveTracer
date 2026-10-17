@@ -19,7 +19,7 @@
   marqueurs, légende, grille, taille et format des images exportées. **Aucune donnée** : contrairement à un
   workspace, un preset s'applique à n'importe quel graphe (graphe courant ou tous les graphes, Ctrl+Z pour
   annuler). Preset **par défaut** pour les nouveaux graphes et workspaces ; fichiers `.ctp` à importer / exporter.
-- **Exécutable plus léger : 20,6 Mo → 15,5 Mo (−25 %)** sans perte de fonction ni de vitesse : seul le moteur graphique de
+- **Exécutable plus léger : 20,6 Mo → 14,5 Mo (−30 %)** sans perte de fonction ni de vitesse : seul le moteur graphique de
   chaque système est compilé (DirectX 12 sous Windows, qui fonctionne aussi sans pilote graphique : machines
   virtuelles, bureau à distance), couche d'accessibilité retirée, optimisation globale du programme (LTO).
   La chaîne de compilation vérifie maintenant que l'exécutable démarre sur une machine sans carte graphique.
