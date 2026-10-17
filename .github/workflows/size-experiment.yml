@@ -11,12 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest]
-        variant: [base, wgpu, wgpu-gles, wgpu-noacc, wgpu-noacc-fat, wgpu-gles-noacc-fat, glow-noacc, glow-noacc-fat]
-        include:
-          - os: ubuntu-latest
-            variant: base
-          - os: ubuntu-latest
-            variant: wgpu-noacc-fat
+        variant: [base, wgpu-noacc-fat, glow-noacc-fat]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -37,9 +32,10 @@ jobs:
       - name: Size
         shell: bash
         run: ls -l target/release/CurveTracer* | grep -v '\.d$'
-      - name: Bloat
-        if: matrix.variant == 'base' || matrix.variant == 'wgpu-noacc-fat'
-        shell: bash
+      - name: Start-up test (no GPU on the runner, like a VM / Remote Desktop)
+        shell: pwsh
         run: |
-          cargo install cargo-bloat --locked
-          cargo bloat --release --crates -n 40
+          $p = Start-Process -FilePath target\release\CurveTracer.exe -PassThru -RedirectStandardError err.txt
+          Start-Sleep -Seconds 12
+          if ($p.HasExited) { Write-Host "EXITED with code $($p.ExitCode)"; Get-Content err.txt | Select-Object -Last 30 }
+          else { Write-Host "RUNNING after 12 s"; Stop-Process -Id $p.Id -Force }
