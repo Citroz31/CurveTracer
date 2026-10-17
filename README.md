@@ -135,6 +135,12 @@ crochets (`[VDD Supply Current [A]]`) ou directement s'ils sont simples (`S21db`
 ![Export](docs/screenshots/export.png)
 ![Diapositive](docs/screenshots/slide-1.png)
 
+### Presets de style (menu *🎨 Presets*)
+- Modèles de présentation réutilisables (`.ctp`) : polices du titre, des axes, des graduations et de la légende,
+  palette, épaisseur et style des courbes, marqueurs, légende, grille, taille et format des images exportées.
+- Aucune donnée (contrairement à un workspace) : applicables à n'importe quel graphe ; preset par défaut pour les
+  nouveaux graphes ; import / export de fichiers pour les partager.
+
 ### Fichiers Touchstone
 - Chargement des `.s1p` … `.snp` comme sources de données (colonnes Freq, S11db, S11deg, S21db…).
 - Export `.snp` depuis la page *Export Data* : nombre de ports détecté, ports écrits au choix.

@@ -5,6 +5,7 @@ mod data;
 mod export;
 mod fonts;
 mod plot;
+mod preset;
 mod recent;
 mod ui;
 

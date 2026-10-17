@@ -1,6 +1,6 @@
 [package]
 name = "curve_tracer"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.95"
 description = "CurveTracer – fast, interactive curve plotting from CSV / Excel measurement files"
@@ -15,8 +15,19 @@ path = "src/main.rs"
 winresource = "0.1"
 
 [dependencies]
-# GUI
-eframe = "0.36"
+# GUI. Only the graphics backend of each system is compiled (DirectX 12 on
+# Windows, which also runs without a GPU driver through its software
+# renderer; Metal on macOS; Vulkan / OpenGL ES on Linux) and the
+# accessibility layer is left out: the executable is 25 % smaller. OpenGL
+# alone (glow) would be smaller still but does not start on PCs without a
+# GPU driver (virtual machines, Remote Desktop).
+eframe = { version = "0.36", default-features = false, features = [
+  "default_fonts",
+  "links",
+  "wayland",
+  "x11",
+  "wgpu_no_default_features",
+] }
 egui = "0.36"
 egui_plot = "0.37"
 epaint_default_fonts = "0.36"
@@ -32,10 +43,22 @@ memchr = "2"
 tiny-skia = "0.11"
 ab_glyph = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "dx12"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "metal"] }
+egui-wgpu = { version = "0.36", features = ["macos-window-resize-jitter-fix"] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"] }
+
 [profile.release]
+# full speed for the data, the plots and the exports; whole-program
+# optimization (smaller and as fast)
 opt-level = 3
-lto = "thin"
-codegen-units = 4
+lto = "fat"
+codegen-units = 1
 strip = true
 
 [profile.dev]

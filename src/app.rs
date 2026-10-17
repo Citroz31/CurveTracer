@@ -261,6 +261,11 @@ pub enum UndoAction {
     Added { id: u64 },
     /// A plot was moved from → to.
     Moved { from: usize, to: usize },
+    /// Plots and export settings before a preset was applied.
+    Styles {
+        plots: Vec<PlotConfig>,
+        export: Box<ExportSettings>,
+    },
 }
 
 /// Change of workspace waiting for the "save the changes?" answer.
@@ -331,6 +336,9 @@ pub struct App {
     task_rx: Receiver<TaskMsg>,
     pub busy: Option<String>,
     pub export: ExportSettings,
+    /// Style presets (templates, no data) and the state of their window.
+    pub presets: crate::preset::Library,
+    pub preset_ui: crate::ui::presets::PresetUi,
     /// "Image format" dialog: (export waiting, size being chosen, keep the 6 : 4.2 ratio).
     pub size_dialog: Option<(ImageExport, ImageSize, bool)>,
     /// Export Data page: settings (saved) and state (plan, running export).
@@ -413,6 +421,8 @@ impl App {
             task_rx,
             busy: None,
             export: ExportSettings::default(),
+            presets: crate::preset::Library::load(),
+            preset_ui: Default::default(),
             size_dialog: None,
             data_export: Default::default(),
             dx: Default::default(),
@@ -888,6 +898,10 @@ impl App {
             cfg.traces = last.cfg.traces.clone();
             cfg.options = last.cfg.options.clone();
         }
+        // the default preset gives its style to the new plots
+        if let Some(style) = self.presets.default_preset().and_then(|p| p.style.as_ref()) {
+            style.apply(&mut cfg);
+        }
         self.plots.push(PlotEntry {
             cfg,
             state: PlotState::default(),
@@ -1053,9 +1067,93 @@ impl App {
                 text = "plot moved back";
                 UndoAction::Moved { from: to, to: from }
             }
+            UndoAction::Styles { plots, export } => {
+                let mut current = Vec::with_capacity(plots.len());
+                for cfg in plots {
+                    if let Some(p) = self.plots.iter_mut().find(|p| p.cfg.id == cfg.id) {
+                        current.push(std::mem::replace(&mut p.cfg, cfg));
+                    }
+                }
+                let export = Box::new(std::mem::replace(&mut self.export, *export));
+                text = "preset";
+                UndoAction::Styles { plots: current, export }
+            }
         };
         self.set_status(format!("Undo / redo: {text}"), false);
         Some(inverse)
+    }
+
+    // ---- presets ----------------------------------------------------------------
+
+    /// Applies a preset: its plot style to the current plot (or to every
+    /// plot) and its export settings. Undoable (Ctrl+Z).
+    pub fn apply_preset(&mut self, name: &str, all_plots: bool, style: bool, export: bool) {
+        let Some(preset) = self.presets.get(name).cloned() else {
+            return;
+        };
+        let targets: Vec<usize> = if all_plots {
+            (0..self.plots.len()).collect()
+        } else if self.active < self.plots.len() {
+            vec![self.active]
+        } else {
+            Vec::new()
+        };
+        let before = UndoAction::Styles {
+            plots: targets.iter().map(|&i| self.plots[i].cfg.clone()).collect(),
+            export: Box::new(self.export.clone()),
+        };
+        let mut done = Vec::new();
+        if style && let Some(s) = &preset.style {
+            for &i in &targets {
+                s.apply(&mut self.plots[i].cfg);
+            }
+            if !targets.is_empty() {
+                done.push(if all_plots {
+                    format!("{} plot(s)", targets.len())
+                } else {
+                    "the current plot".to_owned()
+                });
+            }
+        }
+        if export && let Some(e) = &preset.export {
+            e.apply(&mut self.export);
+            done.push("the export settings".to_owned());
+        }
+        if done.is_empty() {
+            self.set_status(format!("Preset “{name}”: nothing to apply"), true);
+            return;
+        }
+        self.push_undo(before);
+        self.set_status(
+            format!("Preset “{name}” applied to {} (Ctrl+Z to undo)", done.join(" and ")),
+            false,
+        );
+    }
+
+    /// Saves the style of the current plot and / or the export settings as a preset.
+    pub fn save_preset(&mut self, name: &str, description: &str, style: bool, export: bool) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("Give the preset a name".to_owned());
+        }
+        if !style && !export {
+            return Err("Choose what the preset contains".to_owned());
+        }
+        let plot_style = self
+            .plots
+            .get(self.active)
+            .map(|p| crate::preset::PlotStyle::of(&p.cfg))
+            .unwrap_or_default();
+        let preset = crate::preset::Preset {
+            name: name.to_owned(),
+            description: description.trim().to_owned(),
+            style: style.then_some(plot_style),
+            export: export.then(|| crate::preset::ExportStyle::of(&self.export)),
+            ..Default::default()
+        };
+        let path = self.presets.save(preset)?;
+        self.set_status(format!("Preset “{name}” saved ({})", path.display()), false);
+        Ok(())
     }
 
     pub fn plots_using(&self, key: &str) -> usize {
@@ -1277,6 +1375,10 @@ impl App {
             last_dir,
             ..Default::default()
         };
+        // a new workspace starts with the export settings of the default preset
+        if let Some(e) = self.presets.default_preset().and_then(|p| p.export.clone()) {
+            e.apply(&mut self.export);
+        }
         self.data_export = Default::default();
         self.dx = Default::default();
         self.workspace_path = None;

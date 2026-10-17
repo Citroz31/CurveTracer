@@ -1,6 +1,6 @@
 ---
 title: "CurveTracer — Guide utilisateur"
-subtitle: "Version 0.5.0"
+subtitle: "Version 0.6.0"
 ---
 
 # 1. Présentation
@@ -15,6 +15,11 @@ de façon rapide et interactive. Le principe :
 4. on **exporte** les graphes en PowerPoint, en images PNG / SVG ou en CSV
    (page *Export Plots*), et les **données** elles-mêmes en CSV ou en
    Touchstone `.s2p`, lissées ou non (page *Export Data*).
+
+Nouveautés de la version 0.6.0 : **presets de style** (menu *🎨 Presets*,
+§ 11) — modèles réutilisables de présentation et d'export (polices, tailles,
+couleurs, épaisseurs, graduations, légende, format des images) sans aucune
+donnée ; exécutable plus léger.
 
 Nouveautés de la version 0.5.0 : chargement des fichiers **Touchstone**
 `.s1p` … `.snp` (§ 3), export **`.snp`** avec détection du nombre de ports et
@@ -700,7 +705,56 @@ d'origine.
 Astuce : associer l'extension `.ctw` à `CurveTracer.exe` dans Windows permet
 d'ouvrir un projet par double-clic.
 
-# 11. Questions fréquentes
+# 11. Presets de style (menu *🎨 Presets*)
+
+Un **preset** est un **modèle de présentation** réutilisable. À la
+différence d'un espace de travail, il ne contient **aucune donnée** : ni
+fichier, ni graphe, ni colonne, ni filtre, ni texte (titres, noms d'axes),
+ni plage d'axes. Il s'applique donc à n'importe quel graphe de n'importe quel
+workspace.
+
+| | Espace de travail (`.ctw`) | Preset (`.ctp`) |
+|---|---|---|
+| Fichiers de données, de-embedding, fonctions | oui | non |
+| Graphes (X, Y, filtres, séries, titres, plages, curseurs) | oui | non |
+| Polices (titre, noms d'axes, graduations, légende), tailles, couleurs | oui | **oui** |
+| Palette, épaisseur et style des courbes, marqueurs, styles des températures | oui | **oui** |
+| Légende (position, fond, cadre), grille, couleurs de fond | oui | **oui** |
+| Taille des images exportées (6 × 4,2 in…), résolution, format des diapositives | oui | **oui** (au choix) |
+| Où | où l'on veut | dossier des réglages de CurveTracer, partageable par fichier |
+
+![Fenêtre Style presets](screenshots/presets.png)
+
+**Créer un preset** : régler un graphe comme souhaité (onglets *Layout*,
+*Trace Options*, clic droit sur la légende…), puis **🎨 Presets → Save the
+current style as a preset…** : nom, description, et contenu — **Plot
+style** (le style du graphe affiché) et / ou **Export settings** (taille des
+images, résolution, format des diapositives, PNG / SVG).
+
+**Appliquer un preset** :
+
+- menu **🎨 Presets → *nom* → Apply to the current plot / Apply to all the
+  plots** ;
+- ou dans la fenêtre **Manage the presets…** : boutons **Current plot** et
+  **All plots**, avec le choix de ce qui est appliqué (*plot style*, *export
+  settings*).
+
+Les données, titres, noms d'axes, plages et réglages propres à chaque courbe
+(couleur forcée, nom dans la légende…) sont **conservés**. **Ctrl+Z** annule
+l'application d'un preset.
+
+**Preset par défaut (★)** : *☆ Use for new plots and workspaces* (ou le
+bouton *☆ Default* de la fenêtre). Les nouveaux graphes prennent son style et
+les nouveaux workspaces ses réglages d'export. Cliquer à nouveau pour le
+retirer.
+
+**Partager** : *Export…* enregistre un preset dans un fichier `.ctp` (à
+envoyer à un collègue, à mettre sur un serveur commun) ; **Import a preset
+file…** l'ajoute à sa liste. Les presets sont rangés dans le dossier des
+réglages de CurveTracer (`%APPDATA%\CurveTracer\presets` sous Windows),
+indiqué en bas de la fenêtre.
+
+# 12. Questions fréquentes
 
 **Le graphe affiche « Select an X column and at least one Y column ».**
 Choisir X et au moins un Y dans *Data → Select Data*.

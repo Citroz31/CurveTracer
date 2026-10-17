@@ -70,6 +70,11 @@ pub fn show(ui: &mut Ui) {
             ui.label("    Each curve is smoothed on its whole range then cut to the band; phases are unwrapped first. Click a column to preview its smoothing.");
             ui.label("• Formats: CSV (comma, semicolon or tab, decimal comma) · Touchstone .snp (DB / MA / RI, Hz…GHz, reference impedance): the number of ports comes from the S-parameter columns, uncheck ports to write a smaller network. A summary file lists the settings.");
         });
+        section(ui, "8. Style presets (🎨 Presets)", |ui| {
+            ui.label("• A preset is a style template (.ctp): fonts of the title, axis names, tick labels and legend, palette, line widths and styles, markers, legend, grid, export size and format. It holds no data, unlike a workspace.");
+            ui.label("• 🎨 Presets → Save the current style as a preset…, then apply it to the current plot or to all the plots (Ctrl+Z undoes it).");
+            ui.label("• ★ Default preset: style of the new plots and export settings of the new workspaces. Export… / Import… share presets as files.");
+        });
         ui.add_space(8.0);
         ui.label(RichText::new(format!("CurveTracer {}", env!("CARGO_PKG_VERSION"))).weak());
     });

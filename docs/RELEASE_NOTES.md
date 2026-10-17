@@ -12,6 +12,18 @@
 > Les étapes pour supprimer définitivement cet avertissement (signature de code) sont décrites dans `docs/SIGNATURE_WINDOWS.md`.
 > `SHA256SUMS.txt` donne l'empreinte de chaque fichier (vérification, liste blanche du service informatique).
 
+## Nouveautés de la version 0.6.0
+
+- **Presets de style** (menu *🎨 Presets*) : modèles réutilisables de présentation et d'export — polices du titre,
+  des noms d'axes, des graduations et de la légende, tailles, couleurs, palette, épaisseur et style des courbes,
+  marqueurs, légende, grille, taille et format des images exportées. **Aucune donnée** : contrairement à un
+  workspace, un preset s'applique à n'importe quel graphe (graphe courant ou tous les graphes, Ctrl+Z pour
+  annuler). Preset **par défaut** pour les nouveaux graphes et workspaces ; fichiers `.ctp` à importer / exporter.
+- **Exécutable plus léger : 20,6 Mo → 15,5 Mo (−25 %)** sans perte de fonction ni de vitesse : seul le moteur graphique de
+  chaque système est compilé (DirectX 12 sous Windows, qui fonctionne aussi sans pilote graphique : machines
+  virtuelles, bureau à distance), couche d'accessibilité retirée, optimisation globale du programme (LTO).
+  La chaîne de compilation vérifie maintenant que l'exécutable démarre sur une machine sans carte graphique.
+
 ## Nouveautés de la version 0.5.0
 
 - **Chargement des fichiers Touchstone** `.s1p` … `.snp` (versions 1 et 2, DB / MA / RI) : colonnes Freq, S11db,

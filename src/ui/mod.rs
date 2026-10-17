@@ -8,6 +8,7 @@ pub mod functions;
 pub mod help;
 pub mod plot_settings;
 pub mod plots;
+pub mod presets;
 pub mod start;
 pub mod table;
 
@@ -26,6 +27,7 @@ pub const ERR: Color32 = Color32::from_rgb(190, 50, 50);
 pub fn show(app: &mut App, ui: &mut Ui) {
     start::pending_switch_dialog(app, ui.ctx());
     export_page::size_dialog(app, ui.ctx());
+    presets::window(app, ui.ctx());
     if app.show_start {
         start::show(app, ui);
         preview_dropped_files(ui.ctx());
@@ -106,6 +108,7 @@ fn top_bar(app: &mut App, ui: &mut Ui) {
                     }
                 });
                 workspace_menu(app, ui, &ctx);
+                presets::menu(app, ui);
                 ui.menu_button("View", |ui| {
                     ui.visuals_mut().override_text_color = None;
                     if ui.checkbox(&mut app.dark, "Dark theme").changed() {

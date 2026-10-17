@@ -56,6 +56,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
       - name: Build (release)
         run: cargo build --release
+      - name: Start-up test (no GPU on the runner, like a VM / Remote Desktop)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath target\release\CurveTracer.exe -PassThru -RedirectStandardError err.txt
+          Start-Sleep -Seconds 12
+          if ($p.HasExited) { Get-Content err.txt | Select-Object -Last 30; throw "CurveTracer.exe exited at start-up (code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "CurveTracer.exe started: $((Get-Item target\release\CurveTracer.exe).Length) bytes"
       - name: Sign the executable (Azure Artifact Signing)
         if: runner.os == 'Windows' && env.SIGNING_ENABLED == 'true'
         uses: azure/artifact-signing-action@v2
