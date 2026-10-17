@@ -11,7 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest]
-        variant: [base, wgpu-noacc-fat, glow-noacc-fat]
+        variant: [wgpu-noacc-fat-small]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

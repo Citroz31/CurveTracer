@@ -26,6 +26,12 @@ if v != "base":
     s = s.replace('eframe = "0.36"', 'eframe = { version = "0.36", default-features = false, features = [%s] }' % ", ".join('"%s"' % f for f in feats))
 if fat:
     s = s.replace('lto = "thin"', 'lto = "fat"').replace("codegen-units = 4", "codegen-units = 1")
+if "small" in v:
+    extra_prof = "".join(
+        "\n[profile.release.package.%s]\nopt-level = \"s\"\n" % c
+        for c in ["naga", "wgpu-core", "wgpu-hal", "wgpu", "wgpu-types", "egui-wgpu", "codespan-reporting", "rfd", "winit", "egui-winit"]
+    )
+    s += extra_prof
 s = s.replace("[profile.release]", extra + "\n[profile.release]")
 open("Cargo.toml", "w").write(s)
 print(s)
